@@ -2,19 +2,31 @@
 excel_generator.py
 Genererer nettoomsetningsrapporten med 7 regneark.
 Bruker dict fra data_processor.process().
+
+Litteratur og rammeverk:
+  - ABC-analyse:        Dickie (1951) — selektiv lagerstyring
+  - HHI:                Herfindahl-Hirschman (1964) — markedskonsentrasjon
+  - Pareto 80/20:       Juran & Godfrey (1999)
+  - Gini-koeffisient:   Gini (1912) — inntektsulikhet tilpasset portefølje
+  - Konsentrasjonsrate: Utton (1975) — CR3/CR5 markedsandel
+  - XYZ-analyse:        Silver, Pyke & Peterson (1998); Scholz-Reiter et al. (2012)
+  - BCG-matrise:        Henderson (1970) — vekst/andel-porteføljeanalyse
+  - CAGR:               Standard finansiell vekstbenchmarking
+  - Sesongindeks:       Makridakis, Wheelwright & Hyndman (1998)
 """
 import io
 import math
 from datetime import datetime
 
+import pandas as pd
 import xlsxwriter
 
-# ── Måneder ────────────────────────────────────────────────────────────────
+# ── Måneder ─────────────────────────────────────────────────────────────────
 MONTHS_EN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 MONTHS_NO = ["Jan","Feb","Mar","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Des"]
-_M_MAP = dict(zip(MONTHS_EN, MONTHS_NO))   # intern nøkkel → visningsnavn
+_M_MAP = dict(zip(MONTHS_EN, MONTHS_NO))
 
-# ── Farger ─────────────────────────────────────────────────────────────────
+# ── Fargepalett ──────────────────────────────────────────────────────────────
 DARK_BLUE    = "#1A3A5C"
 MID_BLUE     = "#2E75B6"
 LIGHT_BLUE   = "#D6E4F0"
@@ -31,10 +43,13 @@ SEAS_GREEN   = "#C6EFCE"
 SEAS_RED     = "#FFC7CE"
 PURPLE       = "#7B2D8B"
 TEAL         = "#1A7A72"
+LIGHT_GREEN  = "#E9F7EF"
 
+
+# ── Hjelpefunksjoner ─────────────────────────────────────────────────────────
 
 def _v(val):
-    """Returner val, eller '' hvis None/NaN."""
+    """Returnerer val, eller '' hvis None/NaN."""
     if val is None:
         return ""
     try:
@@ -50,15 +65,18 @@ def _pct(val):
 
 
 def _nok(v):
-    return f"NOK {v:,.0f}"
+    try:
+        return f"NOK {v:,.0f}"
+    except Exception:
+        return str(v)
 
 
 def _add_formats(wb):
     f = {}
 
-    # ── Tittel / banner ───────────────────────────────────────────────────
+    # ── Tittel / banner ──────────────────────────────────────────────────
     f["title"] = wb.add_format({
-        "bold": True, "font_size": 18, "font_color": WHITE,
+        "bold": True, "font_size": 16, "font_color": WHITE,
         "bg_color": DARK_BLUE, "align": "left", "valign": "vcenter",
     })
     f["subtitle"] = wb.add_format({
@@ -70,8 +88,19 @@ def _add_formats(wb):
         "bg_color": MID_BLUE, "align": "left", "valign": "vcenter",
         "left": 3, "left_color": GOLD_BORDER,
     })
+    f["section_hdr_green"] = wb.add_format({
+        "bold": True, "font_size": 10, "font_color": WHITE,
+        "bg_color": ACCENT_GREEN, "align": "left", "valign": "vcenter",
+        "left": 3, "left_color": GOLD_BORDER,
+    })
+    f["section_hdr_gold"] = wb.add_format({
+        "bold": True, "font_size": 10, "font_color": DARK_BLUE,
+        "bg_color": GOLD_BG, "align": "left", "valign": "vcenter",
+        "left": 3, "left_color": GOLD_BORDER,
+        "border": 1, "border_color": MID_GREY,
+    })
 
-    # ── KPI-fliser ────────────────────────────────────────────────────────
+    # ── KPI-fliser ───────────────────────────────────────────────────────
     f["kpi_label"] = wb.add_format({
         "bold": True, "font_size": 9, "font_color": DARK_GREY,
         "bg_color": LIGHT_BLUE, "align": "center", "valign": "bottom",
@@ -84,7 +113,7 @@ def _add_formats(wb):
         "left": 1, "left_color": MID_BLUE, "right": 1, "right_color": MID_BLUE,
     })
     f["kpi_value_nok"] = wb.add_format({
-        "bold": True, "font_size": 16, "font_color": DARK_BLUE,
+        "bold": True, "font_size": 14, "font_color": DARK_BLUE,
         "bg_color": LIGHT_BLUE, "align": "center", "valign": "vcenter",
         "num_format": '#,##0 "NOK"',
         "left": 1, "left_color": MID_BLUE, "right": 1, "right_color": MID_BLUE,
@@ -96,7 +125,7 @@ def _add_formats(wb):
         "left": 1, "left_color": MID_BLUE, "right": 1, "right_color": MID_BLUE,
     })
     f["kpi_text"] = wb.add_format({
-        "bold": True, "font_size": 13, "font_color": DARK_BLUE,
+        "bold": True, "font_size": 11, "font_color": DARK_BLUE,
         "bg_color": LIGHT_BLUE, "align": "center", "valign": "vcenter",
         "left": 1, "left_color": MID_BLUE, "right": 1, "right_color": MID_BLUE,
     })
@@ -121,7 +150,7 @@ def _add_formats(wb):
         "left": 1, "left_color": MID_BLUE, "right": 1, "right_color": MID_BLUE,
     })
 
-    # ── Kolonneoverskrifter ────────────────────────────────────────────────
+    # ── Kolonneoverskrifter ──────────────────────────────────────────────
     f["col_hdr"] = wb.add_format({
         "bold": True, "font_size": 10, "font_color": WHITE,
         "bg_color": DARK_BLUE, "align": "center", "valign": "vcenter",
@@ -132,40 +161,53 @@ def _add_formats(wb):
         "bg_color": DARK_BLUE, "align": "left", "valign": "vcenter",
         "border": 1, "border_color": MID_BLUE,
     })
+    f["col_hdr_yr"] = wb.add_format({
+        "bold": True, "font_size": 9, "font_color": WHITE,
+        "bg_color": MID_BLUE, "align": "center", "valign": "vcenter",
+        "border": 1, "border_color": MID_BLUE, "text_wrap": True,
+    })
 
-    # ── Tabellceller ──────────────────────────────────────────────────────
-    def _cell(bold=False, align="left", num_format=None, bg=None):
+    # ── Tabellceller ─────────────────────────────────────────────────────
+    def _cell(bold=False, align="left", num_format=None, bg=None, wrap=False, indent=0):
         d = {
             "font_size": 10, "align": align, "valign": "vcenter",
             "border": 1, "border_color": MID_GREY,
         }
-        if bold:       d["bold"] = True
+        if bold:      d["bold"] = True
         if num_format: d["num_format"] = num_format
-        if bg:         d["bg_color"] = bg
+        if bg:        d["bg_color"] = bg
+        if wrap:      d["text_wrap"] = True
+        if indent:    d["indent"] = indent
         return wb.add_format(d)
 
-    f["cell"]             = _cell()
-    f["cell_c"]           = _cell(align="center")
-    f["cell_nok"]         = _cell(align="right",  num_format='#,##0 "NOK"')
-    f["cell_pct"]         = _cell(align="center", num_format="0.0%")
-    f["cell_pct_yoy"]     = _cell(align="center", num_format='+0.0%;-0.0%;"-"')
-    f["cell_int"]         = _cell(align="center", num_format="#,##0")
-    f["cell_2dec"]        = _cell(align="center", num_format="0.00")
+    f["cell"]           = _cell()
+    f["cell_c"]         = _cell(align="center")
+    f["cell_nok"]       = _cell(align="right",  num_format='#,##0 "NOK"')
+    f["cell_pct"]       = _cell(align="center", num_format="0.0%")
+    f["cell_pct_yoy"]   = _cell(align="center", num_format='+0.0%;-0.0%;"-"')
+    f["cell_int"]       = _cell(align="center", num_format="#,##0")
+    f["cell_2dec"]      = _cell(align="center", num_format="0.00")
+    f["cell_wrap"]      = _cell(wrap=True)
 
-    f["cell_a"]           = _cell(bg=LIGHT_GREY)
-    f["cell_c_a"]         = _cell(align="center", bg=LIGHT_GREY)
-    f["cell_nok_a"]       = _cell(align="right",  num_format='#,##0 "NOK"', bg=LIGHT_GREY)
-    f["cell_pct_a"]       = _cell(align="center", num_format="0.0%",        bg=LIGHT_GREY)
-    f["cell_pct_yoy_a"]   = _cell(align="center", num_format='+0.0%;-0.0%;"-"', bg=LIGHT_GREY)
-    f["cell_int_a"]       = _cell(align="center", num_format="#,##0",       bg=LIGHT_GREY)
-    f["cell_2dec_a"]      = _cell(align="center", num_format="0.00",        bg=LIGHT_GREY)
+    f["cell_a"]         = _cell(bg=LIGHT_GREY)
+    f["cell_c_a"]       = _cell(align="center", bg=LIGHT_GREY)
+    f["cell_nok_a"]     = _cell(align="right",  num_format='#,##0 "NOK"', bg=LIGHT_GREY)
+    f["cell_pct_a"]     = _cell(align="center", num_format="0.0%",        bg=LIGHT_GREY)
+    f["cell_pct_yoy_a"] = _cell(align="center", num_format='+0.0%;-0.0%;"-"', bg=LIGHT_GREY)
+    f["cell_int_a"]     = _cell(align="center", num_format="#,##0",       bg=LIGHT_GREY)
+    f["cell_2dec_a"]    = _cell(align="center", num_format="0.00",        bg=LIGHT_GREY)
+    f["cell_wrap_a"]    = _cell(bg=LIGHT_GREY, wrap=True)
+
+    # Tomme celler (grønn bakgrunn for null-verdier i årskolonner)
+    f["cell_empty_yr"]  = _cell(align="center", bg="#F9F9F9")
 
     # Totalrader
-    f["total"]         = _cell(bold=True, bg=LIGHT_BLUE)
-    f["total_c"]       = _cell(bold=True, align="center", bg=LIGHT_BLUE)
-    f["total_nok"]     = _cell(bold=True, align="right",  num_format='#,##0 "NOK"', bg=LIGHT_BLUE)
-    f["total_pct"]     = _cell(bold=True, align="center", num_format="0.0%",        bg=LIGHT_BLUE)
-    f["total_pct_yoy"] = _cell(bold=True, align="center", num_format='+0.0%;-0.0%;"-"', bg=LIGHT_BLUE)
+    f["total"]          = _cell(bold=True, bg=LIGHT_BLUE)
+    f["total_c"]        = _cell(bold=True, align="center", bg=LIGHT_BLUE)
+    f["total_nok"]      = _cell(bold=True, align="right",  num_format='#,##0 "NOK"', bg=LIGHT_BLUE)
+    f["total_pct"]      = _cell(bold=True, align="center", num_format="0.0%",        bg=LIGHT_BLUE)
+    f["total_pct_yoy"]  = _cell(bold=True, align="center", num_format='+0.0%;-0.0%;"-"', bg=LIGHT_BLUE)
+    f["total_int"]      = _cell(bold=True, align="center", num_format="#,##0",       bg=LIGHT_BLUE)
 
     # Pareto 80%-rad
     f["p80_c"]   = _cell(bold=True, align="center", bg=GOLD_BG)
@@ -234,20 +276,22 @@ def _add_formats(wb):
         "border": 1, "border_color": MID_GREY,
     })
 
-    f["bullet"]     = wb.add_format({"font_size": 10, "align": "left", "valign": "vcenter", "indent": 1})
-    f["blank"]      = wb.add_format({"bg_color": WHITE})
-    f["blank_dark"] = wb.add_format({"bg_color": DARK_BLUE})
-    f["note"]       = wb.add_format({
+    f["bullet"]       = wb.add_format({"font_size": 10, "align": "left", "valign": "vcenter", "indent": 1})
+    f["blank"]        = wb.add_format({"bg_color": WHITE})
+    f["blank_dark"]   = wb.add_format({"bg_color": DARK_BLUE})
+    f["note"]         = wb.add_format({
         "italic": True, "font_size": 8, "font_color": DARK_GREY,
-        "align": "left", "valign": "vcenter", "indent": 1,
+        "align": "left", "valign": "vcenter", "indent": 1, "text_wrap": True,
     })
     f["insight_bold"] = wb.add_format({
         "bold": True, "font_size": 10, "align": "left", "valign": "vcenter",
-        "indent": 1, "font_color": DARK_BLUE,
+        "indent": 1, "font_color": WHITE, "bg_color": DARK_BLUE,
     })
     f["insight_body"] = wb.add_format({
         "font_size": 10, "align": "left", "valign": "vcenter",
-        "indent": 1, "font_color": "#1A1A2E",
+        "indent": 2, "font_color": "#1A1A2E", "text_wrap": True,
+        "bg_color": LIGHT_BLUE,
+        "border": 1, "border_color": MID_GREY,
     })
 
     return f
@@ -264,14 +308,27 @@ def _write_kpi_tile(ws, fmt, row, col, label, value, val_fmt_key, delta=None):
         ws.merge_range(row+2, col, row+2, col+1, delta, fmt["kpi_delta_neg"])
 
 
+def _page_setup(ws, orientation="landscape", fit_wide=True):
+    """Sett utskriftsoppsett: orienterting, skaler til bredde, marger."""
+    if orientation == "landscape":
+        ws.set_landscape()
+    else:
+        ws.set_portrait()
+    ws.set_paper(9)          # A4
+    ws.set_margins(0.5, 0.5, 0.75, 0.75)
+    ws.set_header("&L&\"Calibri,Bold\"&10 &F  &C&10 &A &R&10 Side &P / &N")
+    ws.set_footer("&L&8 Konfidensielt — kun til intern bruk &R&8 Generert &D")
+    if fit_wide:
+        ws.fit_to_pages(1, 0)   # 1 side bredt, ubegrenset høyde
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Ark 1 – Dashbord
 # ──────────────────────────────────────────────────────────────────────────────
 def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
     ws.set_tab_color(DARK_BLUE)
     ws.set_zoom(90)
-
-    import pandas as pd
+    _page_setup(ws)
 
     all_years   = data["all_years"]
     max_year    = data["max_year"]
@@ -291,13 +348,17 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
     peak_m      = data.get("peak_month", "N/A")
     trough_m    = data.get("trough_month", "N/A")
     seas        = data.get("seasonality", {})
+    cr3         = data.get("cr3")
+    cr5         = data.get("cr5")
 
-    ws.set_column(0, 0, 2)
+    # Kolonne-bredder: margin | 7 KPI-par (2 kol hvert = 14) | buffer
+    ws.set_column(0, 0, 3)
     for c in range(1, 15):
-        ws.set_column(c, c, 12)
-    ws.set_column(14, 18, 8)
+        ws.set_column(c, c, 13)
+    ws.set_column(15, 18, 6)
 
-    ws.set_row(0, 32); ws.set_row(1, 16); ws.set_row(2, 14)
+    # Banner
+    ws.set_row(0, 34); ws.set_row(1, 16); ws.set_row(2, 13)
     ws.merge_range(0, 0, 0, 18, f"  {report_name}  |  Nettoomsetningsrapport", fmt["title"])
     ws.merge_range(1, 0, 1, 18,
         f"  Ledersammendrag  ·  {min(all_years)}–{max_year}  ·  Alle tall i NOK",
@@ -306,30 +367,30 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
         f"  Generert: {datetime.now().strftime('%d.%m.%Y  %H:%M')}",
         fmt["subtitle"])
 
-    ws.set_row(3, 6); ws.set_row(4, 18)
+    # ── KPI-fliser ───────────────────────────────────────────────────────
+    ws.set_row(3, 8); ws.set_row(4, 18)
     ws.merge_range(4, 0, 4, 18, "  NØKKELTALL (KPI)", fmt["section_hdr"])
-
-    ws.set_row(5, 4); ws.set_row(6, 18); ws.set_row(7, 38); ws.set_row(8, 16)
+    ws.set_row(5, 5); ws.set_row(6, 20); ws.set_row(7, 40); ws.set_row(8, 18)
 
     prev_year = max_year - 1
     ytd_yoy = None
-    if fy_vals.get(prev_year, 0) != 0:
+    if ytd_vals.get(prev_year, 0) != 0:
         ytd_yoy = (ytd_vals.get(max_year, 0) - ytd_vals.get(prev_year, 0)) / ytd_vals[prev_year]
     fy_yoy = None
     if fy_vals.get(prev_year, 0) != 0:
         fy_yoy = (fy_vals.get(max_year, 0) - fy_vals[prev_year]) / fy_vals[prev_year]
 
     kr = 6
-    _write_kpi_tile(ws, fmt, kr,  1, "TOTAL NETTOOMSETNING",    grand_total,                     "kpi_value_nok")
-    _write_kpi_tile(ws, fmt, kr,  3, f"FY {max_year}",          fy_vals.get(max_year, 0),        "kpi_value_nok",  fy_yoy)
-    _write_kpi_tile(ws, fmt, kr,  5, f"Hittil i år {ytd_label}", ytd_vals.get(max_year, 0),      "kpi_value_nok",  ytd_yoy)
-    _write_kpi_tile(ws, fmt, kr,  7, "CAGR",                    cagr if cagr is not None else 0, "kpi_value_pct")
-    _write_kpi_tile(ws, fmt, kr,  9, "TOPP-VAREMERKE",          top1_brand,                      "kpi_text")
-    _write_kpi_tile(ws, fmt, kr, 11, "TOPP-VAREMERKE ANDEL",    top1_share,                      "kpi_value_pct")
-    _write_kpi_tile(ws, fmt, kr, 13, "TOPP 3 ANDEL",            top3_share,                      "kpi_value_pct")
+    _write_kpi_tile(ws, fmt, kr,  1, "TOTAL NETTOOMSETNING",      grand_total,                     "kpi_value_nok")
+    _write_kpi_tile(ws, fmt, kr,  3, f"FY {max_year}",            fy_vals.get(max_year, 0),        "kpi_value_nok",  fy_yoy)
+    _write_kpi_tile(ws, fmt, kr,  5, f"Hittil i år {ytd_label}",  ytd_vals.get(max_year, 0),       "kpi_value_nok",  ytd_yoy)
+    _write_kpi_tile(ws, fmt, kr,  7, "CAGR",                      cagr if cagr is not None else 0, "kpi_value_pct")
+    _write_kpi_tile(ws, fmt, kr,  9, "TOPP-VAREMERKE",            top1_brand,                      "kpi_text")
+    _write_kpi_tile(ws, fmt, kr, 11, "TOPP-VAREMERKE ANDEL",      top1_share,                      "kpi_value_pct")
+    _write_kpi_tile(ws, fmt, kr, 13, "TOPP 3 ANDEL",              top3_share,                      "kpi_value_pct")
 
     # ── Ledersammendrag ──────────────────────────────────────────────────
-    ws.set_row(9, 6); ws.set_row(10, 18)
+    ws.set_row(9, 8); ws.set_row(10, 18)
     ws.merge_range(10, 0, 10, 18, "  LEDERSAMMENDRAG", fmt["section_hdr"])
 
     bullets = []
@@ -364,6 +425,12 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
         f"▸  Topp-varemerke: {top1_brand}  ({top1_share*100:.1f}% av omsetning)  |  "
         f"Topp 3: {top3_share*100:.1f}% av omsetning"
     )
+    if cr3 is not None:
+        bullets.append(
+            f"▸  Konsentrasjonsrate CR3: {cr3*100:.1f}%  "
+            + (f"  ·  CR5: {cr5*100:.1f}%" if cr5 else "")
+            + "  —  (Utton 1975: andel topp-3/5 varemerker av total omsetning)"
+        )
     if not ann_sum.empty and "net_sales" in ann_sum.columns:
         ns = pd.to_numeric(ann_sum["net_sales"], errors="coerce")
         valid = ann_sum[ns.notna()]
@@ -371,31 +438,30 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
             best = valid.loc[ns[ns.notna()].idxmax()]
             bullets.append(f"▸  Beste år etter omsetning: {best['year']}  ({_nok(float(best['net_sales']))})")
 
-    # Gini-tillegg
     gini_lbl = ("Svært skjev" if gini > 0.6 else "Moderat skjev" if gini > 0.35 else "Relativt jevn")
     bullets.append(
         f"▸  Gini-koeffisient (omsetningsfordeling): {gini:.3f}  —  {gini_lbl} fordeling mellom varemerker"
     )
 
-    ws.set_row(11, 4)
+    ws.set_row(11, 5)
     for i, b in enumerate(bullets):
-        ws.set_row(12 + i, 16)
+        ws.set_row(12 + i, 17)
         ws.merge_range(12 + i, 1, 12 + i, 18, b, fmt["bullet"])
 
     last_bul = 12 + len(bullets) - 1
 
     # ── Årssammendrag ────────────────────────────────────────────────────
-    ws.set_row(last_bul + 1, 6)
+    ws.set_row(last_bul + 1, 8)
     tbl = last_bul + 2
     ws.set_row(tbl, 18)
-    ws.merge_range(tbl, 0, tbl, 18, "  ÅRSSAMMENDRAG NETTOOMSETNING", fmt["section_hdr"])
+    ws.merge_range(tbl, 0, tbl, 8, "  ÅRSSAMMENDRAG NETTOOMSETNING", fmt["section_hdr"])
     tbl += 1
 
-    ws.set_row(tbl, 18)
-    ann_hdrs = ["År", "Nettoomsetning (NOK)", "ÅoÅ-vekst",
+    ws.set_row(tbl, 20)
+    ann_hdrs = ["År", "Nettoomsetning (NOK)", "Antall solgt", "ÅoÅ-vekst",
                 f"Hittil i år {ytd_label} (NOK)", "Hittil YoY", "Beste kvartal"]
-    ann_col_w = [8, 20, 13, 22, 13, 14]
-    for ci, (h, w) in enumerate(zip(ann_hdrs, ann_col_w)):
+    ann_widths = [8, 22, 14, 13, 24, 13, 14]
+    for ci, (h, w) in enumerate(zip(ann_hdrs, ann_widths)):
         hf = fmt["col_hdr_left"] if ci == 0 else fmt["col_hdr"]
         ws.write(tbl, 1 + ci, h, hf)
         ws.set_column(1 + ci, 1 + ci, w)
@@ -403,19 +469,22 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
 
     for ri, (_, row) in enumerate(ann_sum.iterrows()):
         is_alt = ri % 2 == 1
-        lf = fmt["cell_a"] if is_alt else fmt["cell"]
-        nf = fmt["cell_nok_a"] if is_alt else fmt["cell_nok"]
-        pf = fmt["cell_pct_yoy_a"] if is_alt else fmt["cell_pct_yoy"]
-        cf = fmt["cell_c_a"] if is_alt else fmt["cell_c"]
-        ws.set_row(tbl + ri, 16)
+        lf  = fmt["cell_a"]     if is_alt else fmt["cell"]
+        nf  = fmt["cell_nok_a"] if is_alt else fmt["cell_nok"]
+        pf  = fmt["cell_pct_yoy_a"] if is_alt else fmt["cell_pct_yoy"]
+        cf  = fmt["cell_c_a"]   if is_alt else fmt["cell_c"]
+        intf = fmt["cell_int_a"] if is_alt else fmt["cell_int"]
+        ws.set_row(tbl + ri, 17)
         ws.write(tbl + ri, 1, str(row.get("year", "")), lf)
         ws.write(tbl + ri, 2, _v(row.get("net_sales", 0)), nf)
+        units_v = row.get("units", 0)
+        ws.write(tbl + ri, 3, int(units_v) if units_v else 0, intf)
         yoy = _pct(row.get("yoy"))
-        ws.write(tbl + ri, 3, yoy, pf if yoy != "" else lf)
-        ws.write(tbl + ri, 4, _v(row.get("ytd", 0)), nf)
+        ws.write(tbl + ri, 4, yoy, pf if yoy != "" else lf)
+        ws.write(tbl + ri, 5, _v(row.get("ytd", 0)), nf)
         ytd_y = _pct(row.get("ytd_yoy"))
-        ws.write(tbl + ri, 5, ytd_y, pf if ytd_y != "" else lf)
-        ws.write(tbl + ri, 6, str(row.get("best_q", "—")), cf)
+        ws.write(tbl + ri, 6, ytd_y, pf if ytd_y != "" else lf)
+        ws.write(tbl + ri, 7, str(row.get("best_q", "—")), cf)
 
     # ── Strategiske innsikter ────────────────────────────────────────────
     pareto_df = data.get("pareto", pd.DataFrame())
@@ -428,60 +497,68 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
     n_c = sum(1 for v in abc_brands.values() if v == "C")
 
     hhi_lbl = ("Høy konsentrasjon" if hhi > 0.25 else
-               "Moderat konsentrasjon" if hhi > 0.15 else
-               "Diversifisert")
+               "Moderat konsentrasjon" if hhi > 0.15 else "Diversifisert")
     peak_idx   = seas.get(peak_m, 1.0)
     trough_idx = seas.get(trough_m, 1.0)
 
-    si_row = tbl + len(ann_sum) + 2
+    si_row = tbl + len(ann_sum) + 3
     ws.set_row(si_row, 18)
     ws.merge_range(si_row, 0, si_row, 18, "  STRATEGISKE INNSIKTER", fmt["section_hdr"])
-    si_row += 1; ws.set_row(si_row, 6); si_row += 1
+    si_row += 1; ws.set_row(si_row, 5); si_row += 1
+
+    cr_str = ""
+    if cr3 is not None:
+        cr_str = f"  ·  CR3: {cr3*100:.1f}%  CR5: {cr5*100:.1f}%" if cr5 else f"  ·  CR3: {cr3*100:.1f}%"
 
     insights = [
         ("PORTEFØLJEKONSENTRASJON  (Herfindahl-Hirschman-indeks)",
-         f"HHI = {hhi:.3f}  →  {hhi_lbl}.  "
-         + ("Høy avhengighet av få varemerker gir omsetningsrisiko — vurder å bredde porteføljen."
+         f"HHI = {hhi:.3f}  →  {hhi_lbl}{cr_str}.  "
+         + ("Høy avhengighet av få varemerker — vurder å bredde porteføljen."
             if hhi > 0.25 else
-            "Moderat spredning gir rimelig motstandskraft."
+            "Moderat spredning gir rimelig motstandskraft mot enkeltmerkeavhengighet."
             if hhi > 0.15 else
-            "Omsetningen er godt fordelt — lav enkeltmerkeavhengighet.")),
+            "Omsetningen er godt fordelt — lav enkeltmerkeavhengighet.  "
+            "Ref: Herfindahl-Hirschman (1964) · Utton (1975)")),
         ("ABC-KLASSIFISERING  (basert på siste hele år)",
          f"A-klasse: {n_a} varemerker (~70% av omsetning)  ·  "
          f"B-klasse: {n_b} (neste 20%)  ·  "
          f"C-klasse: {n_c} (bunn 10%)  —  "
-         "Prioriter ressurser på A-klasse; evaluer C-klasse for rasjonalisering."),
+         "Prioriter ressurser og lagerplass på A-klasse; evaluer C-klasse for rasjonalisering.  "
+         "Ref: Dickie (1951)"),
         ("PARETO-ANALYSE  (80/20-regelen)",
          f"{n_brands_80} varemerke(r) står for 80% av total omsetning  "
          f"(av {len(abc_brands)} totalt).  "
          + ("Sterk Pareto-konsentrasjon — avhengighetsrisiko er forhøyet."
             if n_brands_80 <= 3 else
-            "Sunn Pareto-fordeling på tvers av varemerkeporteføljen.")),
+            "Sunn Pareto-fordeling på tvers av varemerkeporteføljen.  Ref: Juran & Godfrey (1999)")),
         ("GINI-KOEFFISIENT  (omsetningsulikhet mellom varemerker)",
          f"Gini = {gini:.3f}  —  {'Svært skjev' if gini > 0.6 else 'Moderat skjev' if gini > 0.35 else 'Relativt jevn'} "
-         f"fordeling.  {'Vurder tiltak for å redusere konsentrasjon.' if gini > 0.5 else 'Akseptabelt diversifisert portefølje.'}"),
-        ("SESONGMØNSTER",
-         f"Toppmåned: {peak_m} (indeks {peak_idx:.2f}×)  ·  "
-         f"Bunnmåned: {trough_m} (indeks {trough_idx:.2f}×).  "
+         f"fordeling.  {'Vurder tiltak for å redusere konsentrasjon i porteføljen.' if gini > 0.5 else 'Akseptabelt diversifisert portefølje.'}  "
+         "Ref: Gini (1912)"),
+        ("SESONGMØNSTER  (sesongindeks basert på hele kalenderår)",
+         f"Toppmåned: {_M_MAP.get(peak_m, peak_m)} (indeks {peak_idx:.2f}×)  ·  "
+         f"Bunnmåned: {_M_MAP.get(trough_m, trough_m)} (indeks {trough_idx:.2f}×).  "
          f"Topp/bunn-ratio: {peak_idx / max(trough_idx, 0.01):.1f}×  —  "
-         + ("Høy sesongsvingning: planlegg lager og likviditet deretter."
+         + ("Høy sesongsvingning: planlegg lager og likviditet tilsvarende."
             if peak_idx / max(trough_idx, 0.01) > 2.0 else
-            "Moderat sesongvariasjon — relativt stabil etterspørsel gjennom året.")),
+            "Moderat sesongvariasjon — relativt stabil etterspørsel gjennom året.")
+         + "  Ref: Makridakis et al. (1998)"),
     ]
 
     for label, detail in insights:
-        ws.set_row(si_row, 15)
+        ws.set_row(si_row, 16)
         ws.merge_range(si_row, 1, si_row, 18, f"  {label}", fmt["insight_bold"])
         si_row += 1
-        ws.set_row(si_row, 28)
+        ws.set_row(si_row, 30)
         ws.merge_range(si_row, 1, si_row, 18, f"  {detail}", fmt["insight_body"])
         si_row += 1
-        ws.set_row(si_row, 4); si_row += 1
+        ws.set_row(si_row, 5); si_row += 1
 
     ws.set_row(si_row, 14)
     ws.merge_range(si_row, 1, si_row, 18,
-        "  Rammeverk: HHI (Herfindahl-Hirschman 1964)  ·  ABC-analyse (Dickie 1951)  "
-        "·  Pareto-prinsippet  ·  Gini (1912)  ·  CAGR-vekstbenchmarking",
+        "  Rammeverk: HHI (Herfindahl-Hirschman 1964)  ·  Konsentrasjonsrate CR3/CR5 (Utton 1975)  "
+        "·  ABC-analyse (Dickie 1951)  ·  Pareto (Juran & Godfrey 1999)  "
+        "·  Gini (1912)  ·  Sesongindeks (Makridakis et al. 1998)  ·  CAGR",
         fmt["note"])
 
 
@@ -491,6 +568,7 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
 def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
     ws.set_tab_color(MID_BLUE)
     ws.set_zoom(90)
+    _page_setup(ws)
 
     all_years     = data["all_years"]
     monthly_pivot = data["monthly_pivot"]
@@ -498,41 +576,40 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
     qpivot        = data["quarterly_pivot"]
     seas_dict     = data["seasonality"]
 
-    ws.set_column(0, 0, 8)
+    ws.set_column(0, 0, 10)
     for c in range(1, 13):
-        ws.set_column(c, c, 9)
-    ws.set_column(13, 13, 12)
-    ws.set_column(14, 16, 9)
+        ws.set_column(c, c, 10)
+    ws.set_column(13, 13, 13)
+    ws.set_column(14, 16, 10)
 
-    ws.set_row(0, 32); ws.set_row(1, 14)
+    ws.set_row(0, 34); ws.set_row(1, 15)
     ws.merge_range(0, 0, 0, 16, f"  {report_name}  |  Trendanalyse  —  Nettoomsetning per periode", fmt["title"])
     ws.merge_range(1, 0, 1, 16, "  Alle tall i NOK", fmt["subtitle"])
-    ws.set_row(2, 6)
+    ws.set_row(2, 8)
 
     # ── Månedlig pivot ───────────────────────────────────────────────────
-    # Data positions tracked for chart
-    monthly_hdr_row  = 3   # section header
-    monthly_col_row  = 4   # column header row
-    monthly_data_row = 5   # first data row
+    monthly_hdr_row  = 3
+    monthly_col_row  = 4
+    monthly_data_row = 5
 
     ws.set_row(monthly_hdr_row, 18)
     ws.merge_range(monthly_hdr_row, 0, monthly_hdr_row, 13,
                    "  MÅNEDLIG NETTOOMSETNING (NOK)", fmt["section_hdr"])
 
-    ws.set_row(monthly_col_row, 18)
+    ws.set_row(monthly_col_row, 20)
     ws.write(monthly_col_row, 0, "År", fmt["col_hdr_left"])
     for mi, m_en in enumerate(MONTHS_EN):
         ws.write(monthly_col_row, 1 + mi, _M_MAP.get(m_en, m_en), fmt["col_hdr"])
     ws.write(monthly_col_row, 13, "TOTALT", fmt["col_hdr"])
 
-    n_data_years = 0  # years with data (not TOTAL)
+    n_data_years = 0
     r = monthly_data_row
     for ri, year_str in enumerate(monthly_pivot.index):
         is_total = year_str == "TOTAL"
         is_alt   = ri % 2 == 1 and not is_total
         lf = fmt["total"]     if is_total else (fmt["cell_a"]     if is_alt else fmt["cell"])
         nf = fmt["total_nok"] if is_total else (fmt["cell_nok_a"] if is_alt else fmt["cell_nok"])
-        ws.set_row(r + ri, 16)
+        ws.set_row(r + ri, 17)
         ws.write(r + ri, 0, year_str, lf)
         for mi, m_en in enumerate(MONTHS_EN):
             v = float(monthly_pivot.loc[year_str, m_en]) if m_en in monthly_pivot.columns else 0
@@ -543,12 +620,14 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
         if not is_total:
             n_data_years += 1
 
-    # Chart: linjediagram månedlig omsetning per år
+    ws.freeze_panes(monthly_col_row + 1, 1)
+
+    # Linjediagram — månedlig omsetning per år
     chart = wb.add_chart({"type": "line"})
     colors = [MID_BLUE, ACCENT_GREEN, ACCENT_RED, PURPLE, TEAL, ACCENT_ORG, DARK_BLUE]
     for i in range(n_data_years):
         chart.add_series({
-            "name":       ["Trendanalyse", monthly_col_row, 0, monthly_col_row, 0] if False else str(monthly_pivot.index[i]),
+            "name":       str(monthly_pivot.index[i]),
             "categories": ["Trendanalyse", monthly_col_row, 1, monthly_col_row, 12],
             "values":     ["Trendanalyse", monthly_data_row + i, 1, monthly_data_row + i, 12],
             "line":       {"width": 2.5, "color": colors[i % len(colors)]},
@@ -561,19 +640,17 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
     chart.set_y_axis({"name": "NOK", "num_format": "#,##0"})
     chart.set_legend({"position": "bottom"})
     chart.set_style(10)
-    chart.set_size({"width": 680, "height": 320})
+    chart.set_size({"width": 700, "height": 340})
 
     next_r = r + len(monthly_pivot) + 2
-
     ws.insert_chart(next_r, 0, chart, {"x_offset": 2, "y_offset": 4})
-    chart_rows = 18  # rows occupied by chart
-    next_r += chart_rows
+    next_r += 19
 
-    # ── Månedlig YoY-vekst ───────────────────────────────────────────────
+    # ── Månedlig ÅoÅ-vekst ──────────────────────────────────────────────
     ws.set_row(next_r, 18)
     ws.merge_range(next_r, 0, next_r, 13, "  MÅNEDLIG ÅOÅ-VEKST %", fmt["section_hdr"])
     next_r += 1
-    ws.set_row(next_r, 18)
+    ws.set_row(next_r, 20)
     ws.write(next_r, 0, "Periode", fmt["col_hdr_left"])
     for mi, m_en in enumerate(MONTHS_EN):
         ws.write(next_r, 1 + mi, _M_MAP.get(m_en, m_en), fmt["col_hdr"])
@@ -584,7 +661,7 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
         is_alt = ri % 2 == 1
         lf = fmt["cell_a"] if is_alt else fmt["cell"]
         pf = fmt["cell_pct_yoy_a"] if is_alt else fmt["cell_pct_yoy"]
-        ws.set_row(next_r + ri, 16)
+        ws.set_row(next_r + ri, 17)
         ws.write(next_r + ri, 0, str(row.get("label", "")), lf)
         for mi, m_en in enumerate(MONTHS_EN):
             v = _pct(row.get(m_en))
@@ -592,13 +669,13 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
         fy_v = _pct(row.get("Full Year"))
         ws.write(next_r + ri, 13, fy_v, pf if fy_v != "" else lf)
 
-    next_r += max(len(monthly_yoy), 1) + 2
+    next_r += max(len(monthly_yoy), 1) + 3
 
     # ── Kvartalsoversikt ─────────────────────────────────────────────────
     ws.set_row(next_r, 18)
     ws.merge_range(next_r, 0, next_r, 6, "  KVARTALSVIS NETTOOMSETNING (NOK)", fmt["section_hdr"])
     next_r += 1
-    ws.set_row(next_r, 18)
+    ws.set_row(next_r, 20)
     for ci, h in enumerate(["År", "K1", "K2", "K3", "K4", "Totalt", "K2-andel"]):
         hf = fmt["col_hdr_left"] if ci == 0 else fmt["col_hdr"]
         ws.write(next_r, ci, h, hf)
@@ -609,17 +686,17 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
         lf = fmt["cell_a"] if is_alt else fmt["cell"]
         nf = fmt["cell_nok_a"] if is_alt else fmt["cell_nok"]
         pf = fmt["cell_pct_a"] if is_alt else fmt["cell_pct"]
-        ws.set_row(next_r + ri, 16)
-        ws.write(next_r + ri, 0, str(row.get("Year", "")), lf)
-        for qi, q in enumerate(["Q1", "Q2", "Q3", "Q4"]):
+        ws.set_row(next_r + ri, 17)
+        ws.write(next_r + ri, 0, str(row.get("År", "")), lf)
+        for qi, q in enumerate(["K1", "K2", "K3", "K4"]):
             v = row.get(q, 0)
             ws.write(next_r + ri, 1 + qi, v if v else "", nf if v else lf)
         tot = row.get("Total", 0)
         ws.write(next_r + ri, 5, tot if tot else "", nf if tot else lf)
-        q2s = _pct(row.get("Q2 Share"))
+        q2s = _pct(row.get("K2-andel"))
         ws.write(next_r + ri, 6, q2s, pf if q2s != "" else lf)
 
-    next_r += len(qpivot) + 2
+    next_r += len(qpivot) + 3
 
     # ── Sesongindeks ─────────────────────────────────────────────────────
     ws.set_row(next_r, 18)
@@ -627,12 +704,12 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
                    "  SESONGINDEKS  (1,00 = gjennomsnittsmåned, kun hele kalenderår)",
                    fmt["section_hdr"])
     next_r += 1
-    ws.set_row(next_r, 18)
+    ws.set_row(next_r, 20)
     ws.write(next_r, 0, "Måned", fmt["col_hdr_left"])
     for mi, m_en in enumerate(MONTHS_EN):
         ws.write(next_r, 1 + mi, _M_MAP.get(m_en, m_en), fmt["col_hdr"])
     next_r += 1
-    ws.set_row(next_r, 18)
+    ws.set_row(next_r, 20)
     ws.write(next_r, 0, "Indeks", fmt["cell"])
     for mi, m_en in enumerate(MONTHS_EN):
         v = seas_dict.get(m_en, 1.0)
@@ -640,8 +717,9 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
         ws.write(next_r, 1 + mi, v, sf)
     next_r += 2
     ws.merge_range(next_r, 0, next_r, 13,
-        "  Grønt = sesongtopp (≥ 1,10)  ·  Rødt = sesongbunn (≤ 0,90)  ·  "
-        "Beregnet som månedlig gjennomsnitt / totalt gjennomsnitt over hele år",
+        "  Grønt ≥ 1,10 (sesongtopp)  ·  Rødt ≤ 0,90 (sesongbunn)  ·  "
+        "Beregnet som månedlig gjennomsnitt / totalt gjennomsnitt over hele år  ·  "
+        "Ref: Makridakis, Wheelwright & Hyndman (1998)",
         fmt["note"])
 
 
@@ -651,6 +729,7 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
 def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
     ws.set_tab_color(ACCENT_GREEN)
     ws.set_zoom(90)
+    _page_setup(ws)
 
     all_years  = data["all_years"]
     brand_perf = data["brand_perf"]
@@ -664,16 +743,16 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
     n_yoy = max(0, len(all_years) - 1)
     n_cols = 1 + n_fy + 1 + n_yoy + 1 + 1
 
-    ws.set_column(0, 0, 24)
+    ws.set_column(0, 0, 26)
     for c in range(1, 1 + n_fy):
-        ws.set_column(c, c, 14)
-    ws.set_column(1 + n_fy, 1 + n_fy, 14)
+        ws.set_column(c, c, 15)
+    ws.set_column(1 + n_fy, 1 + n_fy, 15)
     for c in range(2 + n_fy, 2 + n_fy + n_yoy):
-        ws.set_column(c, c, 11)
-    ws.set_column(2 + n_fy + n_yoy, 2 + n_fy + n_yoy, 11)
-    ws.set_column(3 + n_fy + n_yoy, 3 + n_fy + n_yoy, 7)
+        ws.set_column(c, c, 12)
+    ws.set_column(2 + n_fy + n_yoy, 2 + n_fy + n_yoy, 12)
+    ws.set_column(3 + n_fy + n_yoy, 3 + n_fy + n_yoy, 8)
 
-    ws.set_row(0, 32); ws.set_row(1, 14)
+    ws.set_row(0, 34); ws.set_row(1, 15)
     ws.merge_range(0, 0, 0, n_cols,
                    f"  {report_name}  |  Varemerkeanalyse  —  Nettoomsetning per varemerke",
                    fmt["title"])
@@ -681,12 +760,12 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
                    "  Alle tall i NOK  ·  Sortert etter siste hele år  ·  "
                    "ABC = porteføljeklassifisering (Dickie 1951)",
                    fmt["subtitle"])
-    ws.set_row(2, 6)
+    ws.set_row(2, 8)
 
     ws.set_row(3, 18)
     ws.merge_range(3, 0, 3, n_cols, "  VAREMERKEANALYSE", fmt["section_hdr"])
 
-    ws.set_row(4, 18)
+    ws.set_row(4, 20)
     headers = (["Varemerke"] + [f"FY {y}" for y in all_years] +
                [f"Hittil i år {ytd_label}"] +
                [f"ÅoÅ {all_years[i]}v{all_years[i-1]}" for i in range(1, len(all_years))] +
@@ -694,6 +773,8 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
     for ci, h in enumerate(headers):
         hf = fmt["col_hdr_left"] if ci == 0 else fmt["col_hdr"]
         ws.write(4, ci, h, hf)
+
+    ws.freeze_panes(5, 1)
 
     for ri, (_, row) in enumerate(brand_perf.iterrows()):
         brand_name = str(row.get("brand", ""))
@@ -703,7 +784,7 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
         nf  = fmt["total_nok"]     if is_total else (fmt["cell_nok_a"]     if is_alt else fmt["cell_nok"])
         pf  = fmt["total_pct_yoy"] if is_total else (fmt["cell_pct_yoy_a"] if is_alt else fmt["cell_pct_yoy"])
         sf  = fmt["total_pct"]     if is_total else (fmt["cell_pct_a"]     if is_alt else fmt["cell_pct"])
-        ws.set_row(5 + ri, 16)
+        ws.set_row(5 + ri, 17)
 
         ci = 0
         ws.write(5 + ri, ci, brand_name, lf); ci += 1
@@ -715,7 +796,7 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
         for i in range(1, len(all_years)):
             y0, y1 = all_years[i-1], all_years[i]
             yoy_v = _pct(row.get(f"YoY_{y1}v{y0}"))
-            ws.write(5 + ri, ci, yoy_v if yoy_v != "" else "-",
+            ws.write(5 + ri, ci, yoy_v if yoy_v != "" else "—",
                      pf if yoy_v != "" else lf); ci += 1
         share_v = _pct(row.get("share"))
         ws.write(5 + ri, ci, share_v, sf if share_v != "" else lf); ci += 1
@@ -732,9 +813,10 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
     # ── Pareto-analyse ───────────────────────────────────────────────────
     ws.set_row(pareto_section, 18)
     ws.merge_range(pareto_section, 0, pareto_section, 5,
-                   "  PARETO-ANALYSE  —  80/20 Omsetningskonsentrasjon", fmt["section_hdr"])
+                   "  PARETO-ANALYSE  —  80/20 Omsetningskonsentrasjon  (Juran & Godfrey 1999)",
+                   fmt["section_hdr"])
     pareto_section += 1
-    ws.set_row(pareto_section, 18)
+    ws.set_row(pareto_section, 20)
     pareto_hdrs = ["Rang", "Varemerke", "Total omsetning (NOK)", "% av totalt", "Kumulativ %", ""]
     for ci, h in enumerate(pareto_hdrs):
         hf = fmt["col_hdr_left"] if ci == 1 else fmt["col_hdr"]
@@ -750,7 +832,7 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
         nf  = fmt["p80_nok"] if is_80 else (fmt["cell_nok_a"] if is_alt else fmt["cell_nok"])
         pf  = fmt["p80_pct"] if is_80 else (fmt["cell_pct_a"] if is_alt else fmt["cell_pct"])
         tf  = fmt["p80_tag"] if is_80 else lf
-        ws.set_row(pareto_section + ri, 16)
+        ws.set_row(pareto_section + ri, 17)
         ws.write(pareto_section + ri, 0, int(row.get("rank", ri+1)),         lf)
         ws.write(pareto_section + ri, 1, str(row.get("brand", "")),          bf)
         ws.write(pareto_section + ri, 2, float(row.get("total_revenue", 0)), nf)
@@ -758,7 +840,7 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
         ws.write(pareto_section + ri, 4, float(row.get("cumulative", 0)),    pf)
         ws.write(pareto_section + ri, 5, str(row.get("threshold_80", "")),   tf)
 
-    # Chart: topp-10 varemerker — horisontalt stolpediagram
+    # Horisontalt stolpediagram — topp-10 varemerker
     n_chart = min(10, len(pareto_df))
     bar_chart = wb.add_chart({"type": "bar"})
     bar_chart.add_series({
@@ -775,7 +857,7 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
     bar_chart.set_y_axis({"name": "Varemerke", "reverse": True})
     bar_chart.set_legend({"none": True})
     bar_chart.set_style(10)
-    bar_chart.set_size({"width": 560, "height": 380})
+    bar_chart.set_size({"width": 580, "height": 400})
 
     chart_row = pareto_section + len(pareto_df) + 2
     ws.insert_chart(chart_row, 0, bar_chart, {"x_offset": 2, "y_offset": 4})
@@ -787,36 +869,34 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
 def _build_xyz_analyse(wb, ws, data, fmt, report_name="Rapport"):
     ws.set_tab_color(TEAL)
     ws.set_zoom(90)
+    _page_setup(ws)
 
     xyz_df         = data.get("xyz_df")
     abc_xyz_matrix = data.get("abc_xyz_matrix", {})
-    abc_brands     = data.get("abc_brands", {})
 
-    import pandas as pd
     if xyz_df is None or (hasattr(xyz_df, "empty") and xyz_df.empty):
-        ws.merge_range(0, 0, 0, 6, f"  {report_name}  |  XYZ-analyse — Ikke nok data", fmt["title"])
+        ws.merge_range(0, 0, 0, 7, f"  {report_name}  |  XYZ-analyse — Ikke nok data", fmt["title"])
         return
 
     ws.set_column(0, 0, 28)
-    ws.set_column(1, 1, 20)
-    ws.set_column(2, 2, 20)
-    ws.set_column(3, 3, 12)
-    ws.set_column(4, 4, 12)
-    ws.set_column(5, 5, 8)
-    ws.set_column(6, 6, 8)
-    ws.set_column(7, 7, 10)
+    ws.set_column(1, 1, 18)
+    ws.set_column(2, 2, 18)
+    ws.set_column(3, 3, 14)
+    ws.set_column(4, 4, 14)
+    ws.set_column(5, 5, 9)
+    ws.set_column(6, 6, 9)
+    ws.set_column(7, 7, 12)
 
-    ws.set_row(0, 32); ws.set_row(1, 14)
+    ws.set_row(0, 34); ws.set_row(1, 15)
     ws.merge_range(0, 0, 0, 7,
                    f"  {report_name}  |  XYZ-analyse  —  Etterspørselsvariabilitet per varemerke",
                    fmt["title"])
     ws.merge_range(1, 0, 1, 7,
                    "  Variasjonskoeffisient (CV = std/gjennomsnitt) av månedlig omsetning per varemerke  ·  "
-                   "Ref: Silver, Pyke & Peterson (1998)",
+                   "Ref: Silver, Pyke & Peterson (1998); Scholz-Reiter et al. (2012)",
                    fmt["subtitle"])
-    ws.set_row(2, 6)
+    ws.set_row(2, 8)
 
-    # ── Forklaring ───────────────────────────────────────────────────────
     ws.set_row(3, 18)
     ws.merge_range(3, 0, 3, 7, "  METODIKK OG KLASSIFISERING", fmt["section_hdr"])
     exp_rows = [
@@ -830,19 +910,20 @@ def _build_xyz_analyse(wb, ws, data, fmt, report_name="Rapport"):
             "font_size": 10, "font_color": col, "bold": True,
             "align": "left", "valign": "vcenter", "indent": 1,
         })
-        ws.set_row(4 + i, 16)
+        ws.set_row(4 + i, 17)
         ws.merge_range(4 + i, 0, 4 + i, 7, txt, exp_fmt)
-    ws.set_row(7, 6)
+    ws.set_row(7, 8)
 
-    # ── XYZ-tabell ───────────────────────────────────────────────────────
     ws.set_row(8, 18)
     ws.merge_range(8, 0, 8, 7, "  XYZ-KLASSIFISERING PER VAREMERKE", fmt["section_hdr"])
-    ws.set_row(9, 18)
+    ws.set_row(9, 20)
     hdrs = ["Varemerke", "Gj.snitt månedlig (NOK)", "Std.avvik (NOK)",
             "Var.koeff. (CV)", "Antall måneder", "XYZ", "ABC", "Kombinert"]
     for ci, h in enumerate(hdrs):
         hf = fmt["col_hdr_left"] if ci == 0 else fmt["col_hdr"]
         ws.write(9, ci, h, hf)
+
+    ws.freeze_panes(10, 1)
 
     xyz_fmt_map = {"X": "xyz_X", "Y": "xyz_Y", "Z": "xyz_Z"}
 
@@ -852,23 +933,22 @@ def _build_xyz_analyse(wb, ws, data, fmt, report_name="Rapport"):
         nf   = fmt["cell_nok_a"] if is_alt else fmt["cell_nok"]
         cf   = fmt["cell_2dec_a"] if is_alt else fmt["cell_2dec"]
         intf = fmt["cell_int_a"] if is_alt else fmt["cell_int"]
-        ws.set_row(10 + ri, 16)
-        ws.write(10 + ri, 0, str(row.get("brand", "")),         lf)
-        ws.write(10 + ri, 1, float(row.get("mean_monthly", 0)), nf)
-        ws.write(10 + ri, 2, float(row.get("std_monthly", 0)),  nf)
-        ws.write(10 + ri, 3, float(row.get("cv", 0)),           cf)
-        ws.write(10 + ri, 4, int(row.get("n_months", 0)),       intf)
+        ws.set_row(10 + ri, 17)
+        ws.write(10 + ri, 0, str(row.get("brand", "")),          lf)
+        ws.write(10 + ri, 1, float(row.get("mean_monthly", 0)),  nf)
+        ws.write(10 + ri, 2, float(row.get("std_monthly", 0)),   nf)
+        ws.write(10 + ri, 3, float(row.get("cv", 0)),            cf)
+        ws.write(10 + ri, 4, int(row.get("n_months", 0)),        intf)
         xyz_k = str(row.get("xyz", ""))
         ws.write(10 + ri, 5, xyz_k,
                  fmt[xyz_fmt_map[xyz_k]] if xyz_k in xyz_fmt_map else lf)
         abc_k = str(row.get("abc", "—"))
         ws.write(10 + ri, 6, abc_k,
                  fmt[f"abc_{abc_k}"] if abc_k in ("A", "B", "C") else lf)
-        ws.write(10 + ri, 7, str(row.get("combined", "—")),     lf)
+        ws.write(10 + ri, 7, str(row.get("combined", "—")), lf)
 
     matrix_row = 10 + len(xyz_df) + 3
 
-    # ── ABC–XYZ-matrise ──────────────────────────────────────────────────
     ws.set_row(matrix_row, 18)
     ws.merge_range(matrix_row, 0, matrix_row, 4,
                    "  ABC–XYZ KOMBINASJONSMATRISE  (antall varemerker per kvadrant)",
@@ -887,12 +967,12 @@ def _build_xyz_analyse(wb, ws, data, fmt, report_name="Rapport"):
     matrix_row += 1
 
     for abc_k in ["A", "B", "C"]:
-        ws.set_row(matrix_row, 22)
+        ws.set_row(matrix_row, 24)
         ws.write(matrix_row, 0, f"{abc_k}-klasse", fmt[f"abc_{abc_k}"])
         for xi, xyz_k in enumerate(["X", "Y", "Z"]):
             cnt = abc_xyz_matrix.get(abc_k, {}).get(xyz_k, 0)
             cell_fmt = wb.add_format({
-                "bold": True, "font_size": 13, "align": "center",
+                "bold": True, "font_size": 14, "align": "center",
                 "valign": "vcenter", "border": 1, "border_color": MID_GREY,
                 "bg_color": LIGHT_BLUE if cnt > 0 else LIGHT_GREY,
                 "font_color": DARK_BLUE,
@@ -901,11 +981,11 @@ def _build_xyz_analyse(wb, ws, data, fmt, report_name="Rapport"):
         matrix_row += 1
 
     matrix_row += 1
-    ws.set_row(matrix_row, 30)
+    ws.set_row(matrix_row, 32)
     ws.merge_range(matrix_row, 0, matrix_row, 7,
-        "  AX = Høy verdi, stabil (prioriter)  ·  AZ = Høy verdi, erratisk (kritisk risiko)  ·  "
-        "CX = Lav verdi, stabil (standard)  ·  CZ = Lav verdi, erratisk (vurder eliminering)  "
-        "·  Ref: Scholz-Reiter et al. (2012)",
+        "  AX = Høy verdi, stabil (prioriter lagerfokus)  ·  AZ = Høy verdi, erratisk (kritisk risiko, sikkerhetslager)  ·  "
+        "CX = Lav verdi, stabil (standardprosedyre)  ·  CZ = Lav verdi, erratisk (vurder eliminering)  "
+        "·  Ref: Silver, Pyke & Peterson (1998); Scholz-Reiter et al. (2012)",
         fmt["note"])
 
 
@@ -915,25 +995,25 @@ def _build_xyz_analyse(wb, ws, data, fmt, report_name="Rapport"):
 def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
     ws.set_tab_color(PURPLE)
     ws.set_zoom(90)
+    _page_setup(ws)
 
     portfolio_df  = data.get("portfolio_df")
     ref_years     = data.get("portfolio_ref_years")
     avg_growth    = data.get("portfolio_avg_growth")
     avg_share     = data.get("portfolio_avg_share")
 
-    import pandas as pd
     has_data = (portfolio_df is not None and
                 hasattr(portfolio_df, "empty") and
                 not portfolio_df.empty)
 
     ws.set_column(0, 0, 28)
-    ws.set_column(1, 1, 14)
-    ws.set_column(2, 2, 14)
-    ws.set_column(3, 3, 18)
-    ws.set_column(4, 4, 8)
+    ws.set_column(1, 1, 16)
+    ws.set_column(2, 2, 16)
+    ws.set_column(3, 3, 20)
+    ws.set_column(4, 4, 9)
     ws.set_column(5, 8, 22)
 
-    ws.set_row(0, 32); ws.set_row(1, 14)
+    ws.set_row(0, 34); ws.set_row(1, 15)
     ref_str = f"{ref_years[0]}–{ref_years[1]}" if ref_years else "N/A"
     ws.merge_range(0, 0, 0, 8,
                    f"  {report_name}  |  Porteføljeanalyse  —  BCG-inspirert vekst/andel-matrise",
@@ -942,9 +1022,8 @@ def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
                    f"  Referanseperiode: {ref_str}  ·  Vekstrate = ÅoÅ nettoomsetning  ·  "
                    "Andel = andel av total porteføljeomsetning  ·  Ref: Henderson (1970)",
                    fmt["subtitle"])
-    ws.set_row(2, 6)
+    ws.set_row(2, 8)
 
-    # ── Forklaring ───────────────────────────────────────────────────────
     ws.set_row(3, 18)
     ws.merge_range(3, 0, 3, 8, "  KATEGORIER OG STRATEGISKE ANBEFALINGER", fmt["section_hdr"])
 
@@ -965,10 +1044,10 @@ def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
         cat_desc_fmt = wb.add_format({"font_size": 10, "font_color": "#1A1A2E",
                                       "align": "left", "valign": "vcenter", "indent": 1,
                                       "border": 1, "border_color": MID_GREY})
-        ws.set_row(4 + i, 16)
+        ws.set_row(4 + i, 17)
         ws.write(4 + i, 0, f"  {cat_name}", cat_hdr_fmt)
         ws.merge_range(4 + i, 1, 4 + i, 8, desc, cat_desc_fmt)
-    ws.set_row(8, 6)
+    ws.set_row(8, 8)
 
     if not has_data:
         ws.set_row(9, 18)
@@ -977,17 +1056,16 @@ def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
                        fmt["note"])
         return
 
-    # ── Porteføljeoversikt ───────────────────────────────────────────────
     ws.set_row(9, 18)
-    ws.merge_range(9, 0, 9, 8,
-                   f"  PORTEFØLJEOVERSIKT  —  {ref_str}",
-                   fmt["section_hdr"])
-    ws.set_row(10, 18)
+    ws.merge_range(9, 0, 9, 8, f"  PORTEFØLJEOVERSIKT  —  {ref_str}", fmt["section_hdr"])
+    ws.set_row(10, 20)
     hdrs = ["Varemerke", f"Omsetningsandel FY{ref_years[1] if ref_years else ''}",
             "Vekstrate ÅoÅ", "Kategori", "ABC"]
     for ci, h in enumerate(hdrs):
         hf = fmt["col_hdr_left"] if ci == 0 else fmt["col_hdr"]
         ws.write(10, ci, h, hf)
+
+    ws.freeze_panes(11, 1)
 
     cat_fmt_map = {
         "Stjerne":       "cat_stjerne",
@@ -999,10 +1077,10 @@ def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
 
     for ri, (_, row) in enumerate(portfolio_df.iterrows()):
         is_alt = ri % 2 == 1
-        lf = fmt["cell_a"] if is_alt else fmt["cell"]
-        pf = fmt["cell_pct_a"] if is_alt else fmt["cell_pct"]
+        lf  = fmt["cell_a"] if is_alt else fmt["cell"]
+        pf  = fmt["cell_pct_a"] if is_alt else fmt["cell_pct"]
         pyf = fmt["cell_pct_yoy_a"] if is_alt else fmt["cell_pct_yoy"]
-        ws.set_row(11 + ri, 16)
+        ws.set_row(11 + ri, 17)
         ws.write(11 + ri, 0, str(row.get("brand", "")), lf)
         ws.write(11 + ri, 1, _v(row.get("share_pct", 0)), pf)
         g = _pct(row.get("growth_pct"))
@@ -1014,16 +1092,15 @@ def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
         ws.write(11 + ri, 4, abc_k,
                  fmt[f"abc_{abc_k}"] if abc_k in ("A", "B", "C") else lf)
 
-    # Threshold note
     note_row = 11 + len(portfolio_df) + 2
-    ws.set_row(note_row, 26)
+    ws.set_row(note_row, 28)
     ws.merge_range(note_row, 0, note_row, 8,
         f"  Terskelverdi vekst: {avg_growth*100:.1f}% (porteføljegjennomsnitt {ref_str})  ·  "
         f"Terskelverdi andel: {avg_share*100:.2f}% (1 / antall varemerker)  ·  "
-        "Verdiene er interne og relativ til denne porteføljen, ikke markedet som helhet",
+        "Verdiene er interne og relative til denne porteføljen, ikke markedet som helhet.  "
+        "Ref: Henderson (1970) — BCG Growth-Share Matrix",
         fmt["note"])
 
-    # ── Matriseoversikt ──────────────────────────────────────────────────
     matrix_row = note_row + 3
     ws.set_row(matrix_row, 18)
     ws.merge_range(matrix_row, 0, matrix_row, 4,
@@ -1043,7 +1120,7 @@ def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
         ws.write(matrix_row, ci, cat,
                  fmt[cat_fmt_map[cat]] if cat in cat_fmt_map else fmt["cell_c"])
     matrix_row += 1
-    ws.set_row(matrix_row, 22)
+    ws.set_row(matrix_row, 24)
     cnt_fmt = wb.add_format({"bold": True, "font_size": 14, "align": "center",
                              "valign": "vcenter", "border": 1, "border_color": MID_GREY,
                              "bg_color": LIGHT_BLUE})
@@ -1052,32 +1129,49 @@ def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Ark 6 – Topp-artikler
+# Ark 6 – Topp-artikler  (med år-for-år-filter)
 # ──────────────────────────────────────────────────────────────────────────────
 def _build_topp_artikler(wb, ws, data, fmt, report_name="Rapport"):
     ws.set_tab_color(GOLD_BORDER)
-    ws.set_zoom(90)
+    ws.set_zoom(85)
+    _page_setup(ws)
 
     top5_brands         = data.get("top5_brands", [])
     top_items_per_brand = data.get("top_items_per_brand", {})
     abc_brands          = data.get("abc_brands", {})
+    all_years           = data.get("all_years", [])
 
-    ws.set_column(0, 0, 6)
-    ws.set_column(1, 1, 18)
-    ws.set_column(2, 2, 38)
-    ws.set_column(3, 3, 12)
-    ws.set_column(4, 4, 16)
+    # Kolonnestruktur: Rang | Art.nr | Beskrivelse | [År1 Antall | År1 NOK] ... | Total Antall | Total NOK
+    # Faste kolonner: 0=Rang(5), 1=Art.nr(16), 2=Beskrivelse(42)
+    # Dynamiske år-kolonner: 2 kol per år (antall + NOK)
+    # Avslutning: Total Antall + Total NOK
+    yr_cols_start = 3
+    n_yr_col_pairs = len(all_years)      # 2 celler per år
+    total_antall_col = yr_cols_start + n_yr_col_pairs * 2
+    total_nok_col    = total_antall_col + 1
+    last_col         = total_nok_col
 
-    ws.set_row(0, 32); ws.set_row(1, 14)
-    ws.merge_range(0, 0, 0, 4,
+    ws.set_column(0, 0, 6)        # Rang
+    ws.set_column(1, 1, 16)       # Art.nr
+    ws.set_column(2, 2, 44)       # Beskrivelse
+    for i in range(n_yr_col_pairs):
+        ws.set_column(yr_cols_start + i*2,     yr_cols_start + i*2,     12)   # Antall år
+        ws.set_column(yr_cols_start + i*2 + 1, yr_cols_start + i*2 + 1, 15)   # NOK år
+    ws.set_column(total_antall_col, total_antall_col, 13)
+    ws.set_column(total_nok_col,    total_nok_col,    16)
+
+    ws.set_row(0, 34); ws.set_row(1, 15)
+    ws.merge_range(0, 0, 0, last_col,
                    f"  {report_name}  |  Bestselgende artikler etter antall  —  Topp 5 varemerker",
                    fmt["title"])
-    ws.merge_range(1, 0, 1, 4,
-                   "  Rangert etter antall solgte enheter (alle tider)  ·  "
-                   "Farge- og størrelsevarianter slått sammen per basisartikkel",
+    ws.merge_range(1, 0, 1, last_col,
+                   "  Rangert etter totalt antall solgte enheter  ·  "
+                   "Farge- og størrelsesvarianter slått sammen per basisartikkel  ·  "
+                   "Fordelt per år for enkelt sammenligning",
                    fmt["subtitle"])
 
     r = 2
+
     for brand in top5_brands:
         items = top_items_per_brand.get(brand)
         if items is None or len(items) == 0:
@@ -1086,39 +1180,67 @@ def _build_topp_artikler(wb, ws, data, fmt, report_name="Rapport"):
         abc_class  = abc_brands.get(brand, "")
         abc_suffix = f"  [{abc_class}-klasse]" if abc_class else ""
 
+        # Varemerke-seksjon header
         ws.set_row(r, 6); r += 1
-        ws.set_row(r, 20)
-        ws.merge_range(r, 0, r, 4, f"  {brand}{abc_suffix}", fmt["section_hdr"])
+        ws.set_row(r, 22)
+        ws.merge_range(r, 0, r, last_col, f"  {brand}{abc_suffix}", fmt["section_hdr"])
         r += 1
 
-        ws.set_row(r, 18)
-        ws.write(r, 0, "Rang",         fmt["col_hdr"])
-        ws.write(r, 1, "Art.nr.",       fmt["col_hdr"])
-        ws.write(r, 2, "Beskrivelse",   fmt["col_hdr_left"])
-        ws.write(r, 3, "Antall solgt",  fmt["col_hdr"])
-        ws.write(r, 4, "Nettoomsetning (NOK)", fmt["col_hdr"])
+        # Kolonneoverskrifter
+        ws.set_row(r, 32)
+        ws.write(r, 0, "Rang",        fmt["col_hdr"])
+        ws.write(r, 1, "Art.nr.",      fmt["col_hdr"])
+        ws.write(r, 2, "Beskrivelse",  fmt["col_hdr_left"])
+
+        for i, yr in enumerate(all_years):
+            c_ant = yr_cols_start + i * 2
+            c_nok = c_ant + 1
+            ws.write(r, c_ant, f"{yr}\nAntall", fmt["col_hdr_yr"])
+            ws.write(r, c_nok, f"{yr}\nNOK",    fmt["col_hdr_yr"])
+
+        ws.write(r, total_antall_col, "Total\nAntall", fmt["col_hdr"])
+        ws.write(r, total_nok_col,    "Total\nNOK",    fmt["col_hdr"])
         r += 1
 
+        # Datarader
         for ri, (_, item) in enumerate(items.iterrows()):
             is_alt = ri % 2 == 1
-            lf  = fmt["cell_a"]     if is_alt else fmt["cell"]
-            nf  = fmt["cell_nok_a"] if is_alt else fmt["cell_nok"]
+            lf   = fmt["cell_a"]     if is_alt else fmt["cell"]
+            nf   = fmt["cell_nok_a"] if is_alt else fmt["cell_nok"]
             intf = fmt["cell_int_a"] if is_alt else fmt["cell_int"]
-            rf  = fmt["rank_gold"] if ri == 0 else fmt["rank_std"]
-            ws.set_row(r + ri, 16)
-            ws.write(r + ri, 0, ri + 1,                          rf)
-            ws.write(r + ri, 1, str(item.get("article_no", "")), lf)
-            ws.write(r + ri, 2, str(item.get("article_desc", "")), lf)
-            ws.write(r + ri, 3, int(item.get("units", 0)),       intf)
-            ws.write(r + ri, 4, float(item.get("net_sales", 0)), nf)
+            rf   = fmt["rank_gold"]  if ri == 0 else fmt["rank_std"]
+
+            ws.set_row(r + ri, 17)
+            ws.write(r + ri, 0, ri + 1,                             rf)
+            ws.write(r + ri, 1, str(item.get("article_no", "")),    lf)
+            ws.write(r + ri, 2, str(item.get("article_desc", "")),  lf)
+
+            for i, yr in enumerate(all_years):
+                c_ant = yr_cols_start + i * 2
+                c_nok = c_ant + 1
+                u_val = item.get(f"units_{yr}", 0)
+                s_val = item.get(f"sales_{yr}", 0.0)
+                if u_val:
+                    ws.write(r + ri, c_ant, int(u_val),   intf)
+                else:
+                    ws.write(r + ri, c_ant, "",            fmt["cell_empty_yr"] if not is_alt else fmt["cell_empty_yr"])
+                if s_val:
+                    ws.write(r + ri, c_nok, float(s_val), nf)
+                else:
+                    ws.write(r + ri, c_nok, "",            fmt["cell_empty_yr"])
+
+            ws.write(r + ri, total_antall_col, int(item.get("total_units", 0)),   intf)
+            ws.write(r + ri, total_nok_col,    float(item.get("total_sales", 0)), nf)
+
         r += len(items)
 
-    r += 1
-    ws.set_row(r, 14)
-    ws.merge_range(r, 0, r, 4,
+    r += 2
+    ws.set_row(r, 16)
+    ws.merge_range(r, 0, r, last_col,
         "  Varemerkerangering etter all-time nettoomsetning  ·  "
-        "ABC basert på siste hele års omsetningsbidrag  ·  "
-        "Antall = totalt antall solgte enheter på tvers av alle transaksjoner",
+        "ABC basert på siste hele års omsetningsbidrag (Dickie 1951)  ·  "
+        "Antall = totalt solgte enheter på tvers av alle transaksjoner  ·  "
+        "0/tom celle = ingen salg dette år",
         fmt["note"])
 
 
@@ -1128,6 +1250,7 @@ def _build_topp_artikler(wb, ws, data, fmt, report_name="Rapport"):
 def _build_data(wb, ws, data, fmt, report_name="Rapport"):
     ws.set_tab_color(DARK_GREY)
     ws.set_zoom(90)
+    _page_setup(ws, orientation="landscape")
 
     df = data["df"]
 
@@ -1136,24 +1259,27 @@ def _build_data(wb, ws, data, fmt, report_name="Rapport"):
         ("year",         "År",                       8),
         ("month",        "Måned",                    8),
         ("quarter",      "Kvartal",                  9),
-        ("brand",        "Varemerke / Sektor",       24),
-        ("units",        "Antall",                  10),
-        ("net_sales",    "Nettoomsetning (NOK)",     16),
+        ("brand",        "Varemerke / Sektor",       26),
+        ("units",        "Antall",                  11),
+        ("net_sales",    "Nettoomsetning (NOK)",     18),
         ("article_no",   "Art.nr.",                  20),
-        ("article_desc", "Artikkelbeskrivelse",      32),
+        ("article_desc", "Artikkelbeskrivelse",      36),
     ]
 
     for ci, (_, _, w) in enumerate(col_info):
         ws.set_column(ci, ci, w)
 
-    ws.set_row(0, 32)
+    ws.set_row(0, 34)
     ws.merge_range(0, 0, 0, len(col_info)-1,
                    f"  {report_name}  |  Data  —  Rensede transaksjonsdata",
                    fmt["title"])
 
-    ws.set_row(1, 20)
+    ws.set_row(1, 22)
     for ci, (_, hdr, _) in enumerate(col_info):
         ws.write(1, ci, hdr, fmt["col_hdr"])
+
+    ws.freeze_panes(2, 0)
+    ws.autofilter(1, 0, 1 + len(df), len(col_info) - 1)
 
     money_cols = {"net_sales"}
     int_cols   = {"units", "year", "month", "quarter"}
@@ -1170,8 +1296,6 @@ def _build_data(wb, ws, data, fmt, report_name="Rapport"):
             else:
                 fk = fmt["cell_a"] if is_alt else fmt["cell"]
             ws.write(2 + ri, ci, val, fk)
-
-    ws.freeze_panes(2, 0)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1195,13 +1319,13 @@ def generate_dashboard(data: dict, report_name: str = "Rapport") -> bytes:
     ws6 = wb.add_worksheet("Topp-artikler")
     ws7 = wb.add_worksheet("Data")
 
-    _build_dashbord(wb,          ws1, data, fmt, report_name)
-    _build_trendanalyse(wb,      ws2, data, fmt, report_name)
-    _build_varemerkeanalyse(wb,  ws3, data, fmt, report_name)
-    _build_xyz_analyse(wb,       ws4, data, fmt, report_name)
-    _build_portfolje(wb,         ws5, data, fmt, report_name)
-    _build_topp_artikler(wb,     ws6, data, fmt, report_name)
-    _build_data(wb,              ws7, data, fmt, report_name)
+    _build_dashbord(wb,         ws1, data, fmt, report_name)
+    _build_trendanalyse(wb,     ws2, data, fmt, report_name)
+    _build_varemerkeanalyse(wb, ws3, data, fmt, report_name)
+    _build_xyz_analyse(wb,      ws4, data, fmt, report_name)
+    _build_portfolje(wb,        ws5, data, fmt, report_name)
+    _build_topp_artikler(wb,    ws6, data, fmt, report_name)
+    _build_data(wb,             ws7, data, fmt, report_name)
 
     ws1.activate()
     wb.close()

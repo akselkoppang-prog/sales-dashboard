@@ -243,13 +243,14 @@ if uploaded_file is not None:
             return f"NOK {v:,.0f}"
 
         mom_html = ""
-        if kpis["mom_growth"] is not None:
+        if kpis.get("mom_growth") is not None:
             sign = "+" if kpis["mom_growth"] >= 0 else ""
             color = "#1E8449" if kpis["mom_growth"] >= 0 else "#C0392B"
             mom_html = f"""
             <div class="kpi-tile" style="border-left-color:{color}">
                 <div class="kpi-label">MoM-vekst</div>
                 <div class="kpi-value" style="color:{color}">{sign}{kpis['mom_growth']:.1f}%</div>
+                <div class="kpi-sub">siste 2 måneder</div>
             </div>"""
 
         st.markdown(f"""
@@ -314,14 +315,14 @@ else:
                 )
 
                 st.markdown("""
-                **Rapporten inneholder:**
-                - **Ark 1 – Dashbord:** 7 KPI-fliser, ledersammendrag, årssammendrag + strategiske innsikter (HHI, ABC, Pareto, Gini, sesong)
+                **Rapporten inneholder (7 ark):**
+                - **Ark 1 – Dashbord:** 7 KPI-fliser, ledersammendrag, årssammendrag (inkl. antall solgt) + strategiske innsikter (HHI, CR3/CR5, ABC, Pareto, Gini, sesong)
                 - **Ark 2 – Trendanalyse:** Månedlig og kvartalsvis omsetning, ÅoÅ-vekst %, sesongindeks + linjediagram
                 - **Ark 3 – Varemerkeanalyse:** Omsetning per varemerke med ÅoÅ, andel og ABC-klassifisering, Pareto 80/20 + stolpediagram
                 - **Ark 4 – XYZ-analyse:** Etterspørselsvariabilitet (CV), ABC–XYZ-matrise per varemerke
                 - **Ark 5 – Portefølje:** BCG-inspirert vekst/andel-matrise (Stjerne, Melkeku, Spørsmålstegn, Hund)
-                - **Ark 6 – Topp-artikler:** Bestselgende artikler per antall for topp 5 varemerker
-                - **Ark 7 – Data:** Rensede transaksjonsdata med frosne overskrifter
+                - **Ark 6 – Topp-artikler:** Bestselgende artikler per år **og** totalt for topp 5 varemerker — farge/størrelse konsolidert
+                - **Ark 7 – Data:** Rensede transaksjonsdata med frosne overskrifter og autofilter
                 """)
 
             except Exception as e:
