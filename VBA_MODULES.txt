@@ -1,128 +1,261 @@
 ' =============================================================================
-' VBA_MODULES.txt  –  Salgsrapport v1.0.0
-' Instructions:
-'   1. Open the generated .xlsx in Excel.
-'   2. Press Alt+F11 to open the VBA editor.
-'   3. Insert → Module, paste each module below into a separate Module.
-'   4. Save the file as .xlsm (macro-enabled workbook).
+' VBA_MODULES.txt  —  Salgsrapport v1.0.0
+'
+' HOW TO INSTALL (step-by-step)
+' ──────────────────────────────
+'  1. Open the generated .xlsx in Excel.
+'  2. Press Alt+F11  →  VBA Editor opens.
+'  3. In the Project pane (left), right-click your workbook → Insert → Module.
+'  4. Paste ALL of this file into that one module.
+'  5. Close VBA Editor (Alt+F4 or X on the editor window).
+'  6. File → Save As → choose "Excel Macro-Enabled Workbook (*.xlsm)".
+'
+' HOW TO ADD YEAR-FILTER BUTTONS (to Dashbord or Trendanalyse sheet)
+' ───────────────────────────────────────────────────────────────────
+'  A. Go to the sheet where you want the buttons (e.g. Dashbord).
+'  B. Developer tab → Insert → Form Controls → Button (not ActiveX).
+'  C. Draw a small rectangle. When "Assign Macro" dialog appears:
+'       - For "2023" button → assign  FilterYear2023
+'       - For "2024" button → assign  FilterYear2024
+'       - For "2025" button → assign  FilterYear2025
+'       - For "2026" button → assign  FilterYear2026
+'       - For "Alle år" button → assign  FilterAllYears
+'  D. Right-click each button → Edit Text → type the year label.
+'  E. Format buttons consistently: right-click → Format Control →
+'     Colors and Lines → set Fill Color to deep blue (#1A3A5C),
+'     Font Color to white, font Calibri 10 Bold.
+'
+' NOTE: The Developer tab is hidden by default.
+'       File → Options → Customize Ribbon → check "Developer".
 ' =============================================================================
 
-
-' -----------------------------------------------------------------------------
-' MODULE 1: NavigationButtons
-' Add a button to each sheet that calls these subs to jump between sheets.
-' Example: assign NavigateToDashboard to a button on the Dashbord sheet.
-' -----------------------------------------------------------------------------
 Option Explicit
 
-Sub NavigateToDashboard()
-    Sheets("Dashbord").Activate
-    Sheets("Dashbord").Range("A1").Select
+' ─────────────────────────────────────────────────────────────────────────────
+' MODULE 1: YearFilter
+' Filters the "SalgsData" table (Data sheet) by year.
+' Also updates a visible "Active Filter:" label on the Dashboard.
+' ─────────────────────────────────────────────────────────────────────────────
+
+' Master constant — change if your table was renamed
+Private Const DATA_TABLE As String = "SalgsData"
+Private Const DATA_SHEET  As String = "Data"
+
+' ── Public entry points — assign these to your buttons ──────────────────────
+
+Sub FilterYear2023()
+    Call _ApplyYearFilter(2023)
 End Sub
 
-Sub NavigateToTrend()
-    Sheets("Trendanalyse").Activate
-    Sheets("Trendanalyse").Range("A1").Select
+Sub FilterYear2024()
+    Call _ApplyYearFilter(2024)
 End Sub
 
-Sub NavigateToBrand()
-    Sheets("Varemerkeanalyse").Activate
-    Sheets("Varemerkeanalyse").Range("A1").Select
+Sub FilterYear2025()
+    Call _ApplyYearFilter(2025)
 End Sub
 
-Sub NavigateToXYZ()
-    Sheets("XYZ-analyse").Activate
-    Sheets("XYZ-analyse").Range("A1").Select
+Sub FilterYear2026()
+    Call _ApplyYearFilter(2026)
 End Sub
 
-Sub NavigateToPortfolio()
-    Sheets("Portefolje").Activate
-    Sheets("Portefolje").Range("A1").Select
+Sub FilterAllYears()
+    Call _ApplyYearFilter(0)   ' 0 = no filter = show all
 End Sub
 
-Sub NavigateToTopItems()
-    Sheets("Topp-artikler").Activate
-    Sheets("Topp-artikler").Range("A1").Select
-End Sub
+' ── Core filter engine ───────────────────────────────────────────────────────
 
-Sub NavigateToData()
-    Sheets("Data").Activate
-    Sheets("Data").Range("A1").Select
-End Sub
-
-
-' -----------------------------------------------------------------------------
-' MODULE 2: YearFilter
-' Filters the "SalgsData" Excel Table in the Data sheet by year.
-' The year column is assumed to be column 1 (the "year" field in the table).
-' Assign Filter2024, Filter2025, Filter2026, ClearAllFilters to buttons.
-' -----------------------------------------------------------------------------
-Option Explicit
-
-Private Sub FilterByYear(yr As Long)
-    Dim ws As Worksheet
+Private Sub _ApplyYearFilter(yr As Long)
+    Dim ws  As Worksheet
     Dim tbl As ListObject
+    Dim yearCol As Long
 
-    Set ws = Sheets("Data")
-    Set tbl = ws.ListObjects("SalgsData")
+    ' Find the Data sheet and its table
+    On Error GoTo ErrHandler
+    Set ws  = ThisWorkbook.Sheets(DATA_SHEET)
+    Set tbl = ws.ListObjects(DATA_TABLE)
 
-    ' Remove existing autofilter first
-    tbl.AutoFilter.ShowAllData
-
-    ' Apply filter on column 1 (year column) — adjust index if needed
-    Dim yearColIdx As Long
-    yearColIdx = 0
-    Dim lc As ListColumn
-    For Each lc In tbl.ListColumns
-        If LCase(lc.Name) = "year" Or LCase(lc.Name) = "ar" Or LCase(lc.Name) = "år" Then
-            yearColIdx = lc.Index
-            Exit For
-        End If
-    Next lc
-
-    If yearColIdx = 0 Then
-        MsgBox "Could not find 'year' column in SalgsData table.", vbExclamation
+    ' Find the "År" / "year" column index inside the table
+    yearCol = _FindColumn(tbl, Array("år", "year", "ar"))
+    If yearCol = 0 Then
+        MsgBox "Cannot find a 'Year' column in " & DATA_TABLE & "." & vbCrLf & _
+               "Expected column name: 'År' or 'year'.", vbExclamation
         Exit Sub
     End If
 
-    tbl.Range.AutoFilter Field:=yearColIdx, Criteria1:=CStr(yr)
-    ws.Activate
-End Sub
-
-Sub Filter2024()
-    FilterByYear 2024
-End Sub
-
-Sub Filter2025()
-    FilterByYear 2025
-End Sub
-
-Sub Filter2026()
-    FilterByYear 2026
-End Sub
-
-Sub ClearAllFilters()
-    Dim ws As Worksheet
-    Dim tbl As ListObject
-
-    Set ws = Sheets("Data")
-    Set tbl = ws.ListObjects("SalgsData")
-
+    ' Remove any existing filter on that column first
     If tbl.AutoFilter.FilterMode Then
         tbl.AutoFilter.ShowAllData
     End If
 
+    ' Apply new filter (0 = show all, any other value = filter to that year)
+    If yr <> 0 Then
+        tbl.Range.AutoFilter Field:=yearCol, Criteria1:=CStr(yr)
+    End If
+
+    ' Update the status label on all sheets that have one
+    Call _UpdateFilterLabel(yr)
+
+    ' Navigate to the Data sheet so user sees the filtered table
     ws.Activate
-    MsgBox "Alle filtre fjernet.", vbInformation
+    ws.Range("A1").Select
+    Exit Sub
+
+ErrHandler:
+    MsgBox "Error applying year filter: " & Err.Description, vbCritical
+End Sub
+
+' Find column index (1-based within table) matching any name in nameArray
+Private Function _FindColumn(tbl As ListObject, nameArray As Variant) As Long
+    Dim lc As ListColumn
+    Dim n  As Variant
+    For Each lc In tbl.ListColumns
+        For Each n In nameArray
+            If LCase(Trim(lc.Name)) = LCase(CStr(n)) Then
+                _FindColumn = lc.Index
+                Exit Function
+            End If
+        Next n
+    Next lc
+    _FindColumn = 0
+End Function
+
+' Write "Active filter: YYYY" (or "All years") into a named range on each sheet
+' Create a named range called "FilterStatus" on the Dashboard to show this.
+Private Sub _UpdateFilterLabel(yr As Long)
+    Dim nm As Name
+    On Error Resume Next
+    Set nm = ThisWorkbook.Names("FilterStatus")
+    On Error GoTo 0
+
+    Dim label As String
+    If yr = 0 Then
+        label = "Filter: Alle år"
+    Else
+        label = "Filter: " & CStr(yr)
+    End If
+
+    If Not nm Is Nothing Then
+        nm.RefersToRange.Value = label
+    End If
+
+    ' Also update a cell on the Dashboard if it exists (row 3, col A = cell A3)
+    On Error Resume Next
+    ThisWorkbook.Sheets("Dashbord").Range("A3").Value = "  " & label
+    On Error GoTo 0
 End Sub
 
 
-' -----------------------------------------------------------------------------
-' MODULE 3: ExportToPDF
-' Exports a selected sheet (or the entire workbook) to PDF.
-' Assign ExportActiveToPDF or ExportAllToPDF to buttons as needed.
-' -----------------------------------------------------------------------------
-Option Explicit
+' ─────────────────────────────────────────────────────────────────────────────
+' MODULE 2: NavigationButtons
+' One sub per sheet — assign to buttons for instant navigation.
+' ─────────────────────────────────────────────────────────────────────────────
+
+Sub GoToDashboard()
+    ThisWorkbook.Sheets("Dashbord").Activate
+    ThisWorkbook.Sheets("Dashbord").Range("A1").Select
+End Sub
+
+Sub GoToTrend()
+    ThisWorkbook.Sheets("Trendanalyse").Activate
+    ThisWorkbook.Sheets("Trendanalyse").Range("A1").Select
+End Sub
+
+Sub GoToBrands()
+    ThisWorkbook.Sheets("Varemerkeanalyse").Activate
+    ThisWorkbook.Sheets("Varemerkeanalyse").Range("A1").Select
+End Sub
+
+Sub GoToXYZ()
+    ThisWorkbook.Sheets("XYZ-analyse").Activate
+    ThisWorkbook.Sheets("XYZ-analyse").Range("A1").Select
+End Sub
+
+Sub GoToPortfolio()
+    ThisWorkbook.Sheets("Portefølje").Activate
+    ThisWorkbook.Sheets("Portefølje").Range("A1").Select
+End Sub
+
+Sub GoToTopItems()
+    ThisWorkbook.Sheets("Topp-artikler").Activate
+    ThisWorkbook.Sheets("Topp-artikler").Range("A1").Select
+End Sub
+
+Sub GoToData()
+    ThisWorkbook.Sheets("Data").Activate
+    ThisWorkbook.Sheets("Data").Range("A1").Select
+End Sub
+
+
+' ─────────────────────────────────────────────────────────────────────────────
+' MODULE 3: AddYearButtons
+' Run this ONCE to auto-create all 5 year-filter buttons on the Dashboard.
+' Much faster than drawing them manually.
+' Run via: Alt+F8 → select AddYearButtons → Run
+' ─────────────────────────────────────────────────────────────────────────────
+
+Sub AddYearButtons()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Dashbord")
+
+    ' Remove any existing year buttons first
+    Dim shp As Shape
+    For Each shp In ws.Shapes
+        If Left(shp.Name, 10) = "YearBtn_  " Or InStr(shp.AlternativeText, "YearFilterBtn") > 0 Then
+            shp.Delete
+        End If
+    Next shp
+
+    ' Button layout: 5 buttons in a row starting at row ~2, left margin
+    Dim btnLabels  As Variant
+    Dim btnMacros  As Variant
+    btnLabels = Array("2023", "2024", "2025", "2026", "Alle år")
+    btnMacros = Array("FilterYear2023", "FilterYear2024", "FilterYear2025", "FilterYear2026", "FilterAllYears")
+
+    Dim btnW  As Double: btnW  = 60   ' button width  (pts)
+    Dim btnH  As Double: btnH  = 22   ' button height (pts)
+    Dim gap   As Double: gap   = 6    ' gap between buttons
+    Dim startX As Double: startX = 60  ' left offset from col A
+    Dim startY As Double: startY = 8   ' top offset from row 1
+
+    Dim i As Long
+    For i = 0 To UBound(btnLabels)
+        Dim btn As Shape
+        Set btn = ws.Shapes.AddFormControl(xlButtonControl, _
+            startX + i * (btnW + gap), startY, btnW, btnH)
+
+        With btn
+            .Name              = "YearBtn_" & btnLabels(i)
+            .AlternativeText   = "YearFilterBtn"
+            .OnAction          = btnMacros(i)
+            .TextFrame.Characters.Text = CStr(btnLabels(i))
+            With .TextFrame.Characters.Font
+                .Name  = "Calibri"
+                .Size  = 9
+                .Bold  = True
+                .Color = RGB(255, 255, 255)   ' white text
+            End With
+            With .Fill
+                .Solid
+                .ForeColor.RGB = RGB(26, 58, 92)   ' #1A3A5C dark navy
+            End With
+            With .Line
+                .ForeColor.RGB = RGB(46, 117, 182)  ' #2E75B6 mid-blue border
+                .Weight = 1
+            End With
+        End With
+    Next i
+
+    MsgBox "5 year-filter buttons created on the Dashbord sheet." & vbCrLf & _
+           "Assign the FilterYear* macros manually if the OnAction didn't stick " & _
+           "(right-click each button → Assign Macro).", vbInformation
+End Sub
+
+
+' ─────────────────────────────────────────────────────────────────────────────
+' MODULE 4: ExportToPDF
+' Exports active sheet or all report sheets (except Data) to PDF.
+' ─────────────────────────────────────────────────────────────────────────────
 
 Sub ExportActiveToPDF()
     Dim ws As Worksheet
@@ -134,7 +267,7 @@ Sub ExportActiveToPDF()
         FileFilter:="PDF Files (*.pdf), *.pdf", _
         Title:="Lagre ark som PDF")
 
-    If savePath = "False" Then Exit Sub   ' user cancelled
+    If savePath = "False" Then Exit Sub
 
     ws.ExportAsFixedFormat _
         Type:=xlTypePDF, _
@@ -144,7 +277,7 @@ Sub ExportActiveToPDF()
         IgnorePrintAreas:=False, _
         OpenAfterPublish:=True
 
-    MsgBox "Arket ble eksportert til PDF:" & vbCrLf & savePath, vbInformation
+    MsgBox "Eksportert: " & savePath, vbInformation
 End Sub
 
 Sub ExportAllToPDF()
@@ -156,66 +289,24 @@ Sub ExportAllToPDF()
 
     If savePath = "False" Then Exit Sub
 
-    ' Print all visible sheets except "Data" (raw data) to PDF
-    Dim sheetsToExport() As String
-    Dim count As Long
-    count = 0
+    Dim names() As String
+    Dim count As Long: count = 0
     Dim ws As Worksheet
-
     For Each ws In ThisWorkbook.Worksheets
         If ws.Visible = xlSheetVisible And ws.Name <> "Data" Then
             count = count + 1
-            ReDim Preserve sheetsToExport(1 To count)
-            sheetsToExport(count) = ws.Name
+            ReDim Preserve names(1 To count)
+            names(count) = ws.Name
         End If
     Next ws
 
-    If count = 0 Then
-        MsgBox "Ingen synlige ark å eksportere.", vbExclamation
-        Exit Sub
-    End If
+    If count = 0 Then MsgBox "No visible sheets to export.", vbExclamation: Exit Sub
 
-    ThisWorkbook.Sheets(sheetsToExport).Select
+    ThisWorkbook.Sheets(names).Select
     ActiveSheet.ExportAsFixedFormat _
-        Type:=xlTypePDF, _
-        Filename:=savePath, _
-        Quality:=xlQualityStandard, _
-        IncludeDocProperties:=True, _
-        IgnorePrintAreas:=False, _
-        OpenAfterPublish:=True
+        Type:=xlTypePDF, Filename:=savePath, _
+        Quality:=xlQualityStandard, OpenAfterPublish:=True
 
-    ' Deselect (go back to Dashboard)
-    Sheets("Dashbord").Activate
-    MsgBox "Rapporten ble eksportert til PDF:" & vbCrLf & savePath, vbInformation
-End Sub
-
-
-' -----------------------------------------------------------------------------
-' MODULE 4: RefreshAll
-' Refreshes all pivot tables / queries (useful if connected to external data).
-' Assign RefreshReport to a button on the Dashboard.
-' -----------------------------------------------------------------------------
-Option Explicit
-
-Sub RefreshReport()
-    Application.ScreenUpdating = False
-
-    Dim ws As Worksheet
-    Dim pt As PivotTable
-
-    ' Refresh all pivot tables
-    For Each ws In ThisWorkbook.Worksheets
-        For Each pt In ws.PivotTables
-            pt.RefreshTable
-        Next pt
-    Next ws
-
-    ' Refresh all query connections
-    Dim conn As WorkbookConnection
-    For Each conn In ThisWorkbook.Connections
-        conn.Refresh
-    Next conn
-
-    Application.ScreenUpdating = True
-    MsgBox "Rapporten er oppdatert.", vbInformation
+    ThisWorkbook.Sheets("Dashbord").Activate
+    MsgBox "Eksportert: " & savePath, vbInformation
 End Sub
