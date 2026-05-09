@@ -192,7 +192,13 @@ def process(uploaded_file):
     for y in all_years:
         ns   = fy_vals[y]
         prev = fy_vals.get(y - 1, None)
-        yoy  = (ns - prev) / prev if (prev and prev != 0) else None
+        # For the current partial year, comparing FY total (e.g. 4 months) to the
+        # previous full year (12 months) produces a deeply misleading number like
+        # -84%. Suppress it; ytd_yoy (same-period comparison) is shown instead.
+        if y == max_year:
+            yoy = None
+        else:
+            yoy  = (ns - prev) / prev if (prev and prev != 0) else None
         ytd  = ytd_vals[y]
         prev_ytd_v = ytd_vals.get(y - 1, None)
         ytd_yoy = (ytd - prev_ytd_v) / prev_ytd_v if (prev_ytd_v and prev_ytd_v != 0) else None
@@ -216,17 +222,39 @@ def process(uploaded_file):
     monthly_pivot = pd.concat([mpivot, tot_row])
 
     # ── Månedlig ÅoÅ-vekst ──────────────────────────────────────────────────
+    # For the current partial year (max_year), months beyond max_month have no
+    # data. We must NOT compute (0 - prev) / prev = -100% for those months —
+    # that would misrepresent a missing month as a sales collapse.
     yoy_rows = []
     for i in range(1, len(all_years)):
         y0, y1 = all_years[i - 1], all_years[i]
-        row = {"label": f"{y1} vs {y0}"}
+        label_suffix = f" (YTD {ytd_label})" if y1 == max_year else ""
+        row = {"label": f"{y1} vs {y0}{label_suffix}"}
         for mi, m in enumerate(MONTHS):
+            month_num = mi + 1
             v0 = float(mpivot.loc[str(y0), m]) if str(y0) in mpivot.index else 0
             v1 = float(mpivot.loc[str(y1), m]) if str(y1) in mpivot.index else 0
-            row[m] = (v1 - v0) / v0 if v0 != 0 else None
-        t0 = float(mpivot.loc[str(y0), "TOTAL"]) if str(y0) in mpivot.index else 0
-        t1 = float(mpivot.loc[str(y1), "TOTAL"]) if str(y1) in mpivot.index else 0
-        row["Full Year"] = (t1 - t0) / t0 if t0 != 0 else None
+            # Skip months the partial year hasn't reached yet — show None not -100%
+            if y1 == max_year and month_num > max_month:
+                row[m] = None
+            elif v0 != 0:
+                row[m] = (v1 - v0) / v0
+            else:
+                row[m] = None
+        # Full-year comparison only makes sense when y1 is complete
+        if y1 == max_year:
+            # Use YTD totals (same month range) for a fair comparison
+            ytd_t0 = sum(
+                float(mpivot.loc[str(y0), MONTHS[mo - 1]])
+                if str(y0) in mpivot.index else 0
+                for mo in range(1, max_month + 1)
+            )
+            ytd_t1 = float(mpivot.loc[str(y1), "TOTAL"]) if str(y1) in mpivot.index else 0
+            row["Full Year"] = (ytd_t1 - ytd_t0) / ytd_t0 if ytd_t0 != 0 else None
+        else:
+            t0 = float(mpivot.loc[str(y0), "TOTAL"]) if str(y0) in mpivot.index else 0
+            t1 = float(mpivot.loc[str(y1), "TOTAL"]) if str(y1) in mpivot.index else 0
+            row["Full Year"] = (t1 - t0) / t0 if t0 != 0 else None
         yoy_rows.append(row)
     monthly_yoy = pd.DataFrame(yoy_rows)
 
@@ -274,14 +302,23 @@ def process(uploaded_file):
         row["YTD"] = float(brand_ytd.loc[brand, max_year]) if (brand in brand_ytd.index and max_year in brand_ytd.columns) else 0.0
         for i in range(1, len(all_years)):
             y0, y1 = all_years[i - 1], all_years[i]
-            v0 = row.get(f"FY{y0}", 0)
-            v1 = row.get(f"FY{y1}", 0)
-            if v0 == 0:
-                row[f"YoY_{y1}v{y0}"] = None
-            elif v1 == 0:
-                row[f"YoY_{y1}v{y0}"] = -1.0
+            if y1 == max_year:
+                # YTD vs YTD: compare same months only — avoids penalising partial year
+                ytd_v1 = float(brand_ytd.loc[brand, max_year]) if (brand in brand_ytd.index and max_year in brand_ytd.columns) else 0.0
+                ytd_v0 = float(brand_ytd.loc[brand, y0])       if (brand in brand_ytd.index and y0     in brand_ytd.columns) else 0.0
+                if ytd_v0 == 0:
+                    row[f"YoY_{y1}v{y0}"] = None
+                else:
+                    row[f"YoY_{y1}v{y0}"] = (ytd_v1 - ytd_v0) / ytd_v0
             else:
-                row[f"YoY_{y1}v{y0}"] = (v1 - v0) / v0
+                v0 = row.get(f"FY{y0}", 0)
+                v1 = row.get(f"FY{y1}", 0)
+                if v0 == 0:
+                    row[f"YoY_{y1}v{y0}"] = None
+                elif v1 == 0:
+                    row[f"YoY_{y1}v{y0}"] = -1.0
+                else:
+                    row[f"YoY_{y1}v{y0}"] = (v1 - v0) / v0
         v_last = row.get(f"FY{last_full}", 0)
         row["share"] = (v_last / total_last_full) if total_last_full > 0 else 0
         brand_rows.append(row)

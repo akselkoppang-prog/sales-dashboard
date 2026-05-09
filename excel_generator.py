@@ -422,20 +422,25 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
         fy_yoy = (fy_vals.get(max_year, 0) - fy_vals[prev_year]) / fy_vals[prev_year]
 
     kr = 6
-    _write_kpi_tile(ws, fmt, kr,  1, "TOTAL NETTOOMSETNING",     grand_total,                     "kpi_value_nok")
-    _write_kpi_tile(ws, fmt, kr,  3, f"FY {max_year}",           fy_vals.get(max_year, 0),        "kpi_value_nok", fy_yoy)
-    _write_kpi_tile(ws, fmt, kr,  5, f"Hittil i år {ytd_label}", ytd_vals.get(max_year, 0),       "kpi_value_nok", ytd_yoy)
-    _write_kpi_tile(ws, fmt, kr,  7, "CAGR",                     cagr if cagr is not None else 0, "kpi_value_pct")
-    _write_kpi_tile(ws, fmt, kr,  9, "TOPP-VAREMERKE",           top1_brand,                      "kpi_text")
-    _write_kpi_tile(ws, fmt, kr, 11, "TOPP-VAREMERKE ANDEL",     top1_share,                      "kpi_value_pct")
-    _write_kpi_tile(ws, fmt, kr, 13, "TOPP 3 ANDEL",             top3_share,                      "kpi_value_pct")
+    # For the current partial year, fy_yoy compares an incomplete period to a
+    # full prior year — always wrong. Show ytd_yoy (same-months comparison) instead.
+    partial_year_note = f"YTD {ytd_label}" if full_years else ytd_label
+    _write_kpi_tile(ws, fmt, kr,  1, "TOTAL NETTOOMSETNING",              grand_total,                     "kpi_value_nok")
+    _write_kpi_tile(ws, fmt, kr,  3, f"FY {max_year} ({partial_year_note})", fy_vals.get(max_year, 0),    "kpi_value_nok", ytd_yoy)
+    _write_kpi_tile(ws, fmt, kr,  5, f"Hittil i år {ytd_label}",          ytd_vals.get(max_year, 0),      "kpi_value_nok", ytd_yoy)
+    _write_kpi_tile(ws, fmt, kr,  7, "CAGR",                              cagr if cagr is not None else 0, "kpi_value_pct")
+    _write_kpi_tile(ws, fmt, kr,  9, "TOPP-VAREMERKE",                    top1_brand,                      "kpi_text")
+    _write_kpi_tile(ws, fmt, kr, 11, "TOPP-VAREMERKE ANDEL",              top1_share,                      "kpi_value_pct")
+    _write_kpi_tile(ws, fmt, kr, 13, "TOPP 3 ANDEL",                      top3_share,                      "kpi_value_pct")
 
     # ── Sparkline-strip: 12-mnd trend for hvert år ───────────────────────
     # Trendanalyse-ark: monthly_data_row=5 (0-idx), år i rekkefølge
     spr = kr + 3   # sparkline row
     ws.set_row(spr, 36)
     ws.write(spr, 0, "", fmt["sparkline_cell"])
-    ws.merge_range(spr, 1, spr, 2, f"▼ 12-mnd trend", fmt["sparkline_label"])
+    # Use actual trend direction based on comparing last two full years
+    _trend_arrow = "▲" if (len(full_years) >= 2 and fy_vals.get(full_years[-1], 0) >= fy_vals.get(full_years[-2], 0)) else "▼"
+    ws.merge_range(spr, 1, spr, 2, f"{_trend_arrow} 12-mnd trend", fmt["sparkline_label"])
 
     for yr_i, yr in enumerate(all_years):
         excel_data_row = 5 + yr_i + 1   # 1-indexed: row 6 for first year
@@ -475,20 +480,19 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
         f"▸  Total nettoomsetning alle år: {_nok(grand_total)}  |  "
         f"{len(all_years)} år med data ({min(all_years)}–{max_year})"
     )
-    if fy_yoy is not None:
-        arrow = "▲" if fy_yoy >= 0 else "▼"
-        bullets.append(
-            f"▸  FY {max_year}: {_nok(fy_vals.get(max_year, 0))}  "
-            f"{arrow} {abs(fy_yoy)*100:.1f}% sammenlignet med FY {prev_year}"
-        )
-    else:
-        bullets.append(f"▸  FY {max_year}: {_nok(fy_vals.get(max_year, 0))}")
-
+    # Always show YTD comparison for the current year — full-year vs full-year
+    # would be misleading because max_year is a partial year (data up to max_month).
+    bullets.append(
+        f"▸  FY {max_year} ({ytd_label} YTD): {_nok(fy_vals.get(max_year, 0))}"
+        + (f"  {'▲' if ytd_yoy >= 0 else '▼'} {abs(ytd_yoy)*100:.1f}% vs {ytd_label} {prev_year}"
+           if ytd_yoy is not None else "  (første dataår)")
+    )
     if ytd_yoy is not None:
         arrow = "▲" if ytd_yoy >= 0 else "▼"
         bullets.append(
             f"▸  Hittil i år ({ytd_label}) {max_year}: {_nok(ytd_vals.get(max_year, 0))}  "
-            f"{arrow} {abs(ytd_yoy)*100:.1f}% vs {ytd_label} {prev_year}"
+            f"{arrow} {abs(ytd_yoy)*100:.1f}% vs {ytd_label} {prev_year}  "
+            f"(samme periode sammenlignet — ikke full-år mot del-år)"
         )
     if cagr is not None and len(full_years) >= 2:
         cagr_lbl = ("Sterk" if cagr >= 0.15 else
@@ -535,9 +539,10 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
     ws.merge_range(tbl, 0, tbl, 8, "  ÅRSSAMMENDRAG NETTOOMSETNING", fmt["section_hdr"])
     tbl += 1
     ws.set_row(tbl, 20)
-    ann_hdrs = ["År", "Nettoomsetning (NOK)", "Antall solgt", "ÅoÅ-vekst",
-                f"Hittil i år {ytd_label} (NOK)", "Hittil YoY", "Beste kvartal"]
-    ann_widths = [8, 22, 14, 13, 24, 13, 14]
+    ann_hdrs = ["År", "Nettoomsetning (NOK)", "Antall solgt",
+                f"ÅoÅ-vekst *",
+                f"Hittil i år {ytd_label} (NOK)", f"YTD ÅoÅ ({ytd_label})", "Beste kvartal"]
+    ann_widths = [14, 24, 14, 18, 26, 22, 14]
     for ci, (h, w) in enumerate(zip(ann_hdrs, ann_widths)):
         hf = fmt["col_hdr_left"] if ci == 0 else fmt["col_hdr"]
         ws.write(tbl, 1 + ci, h, hf)
@@ -545,6 +550,8 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
     tbl += 1
 
     for ri, (_, row) in enumerate(ann_sum.iterrows()):
+        yr_str = str(row.get("year", ""))
+        is_current = yr_str == str(max_year)
         is_alt = ri % 2 == 1
         lf   = fmt["cell_a"]         if is_alt else fmt["cell"]
         nf   = fmt["cell_nok_a"]     if is_alt else fmt["cell_nok"]
@@ -552,16 +559,27 @@ def _build_dashbord(wb, ws, data, fmt, report_name="Rapport"):
         cf   = fmt["cell_c_a"]       if is_alt else fmt["cell_c"]
         intf = fmt["cell_int_a"]     if is_alt else fmt["cell_int"]
         ws.set_row(tbl + ri, 17)
-        ws.write(tbl + ri, 1, str(row.get("year", "")), lf)
+        # Label partial year clearly so management can't mistake it for full-year
+        label = f"{yr_str} (YTD {ytd_label})" if is_current else yr_str
+        ws.write(tbl + ri, 1, label, lf)
         ws.write(tbl + ri, 2, _v(row.get("net_sales", 0)), nf)
         units_v = row.get("units", 0)
         ws.write(tbl + ri, 3, int(units_v) if units_v else 0, intf)
         yoy = _pct(row.get("yoy"))
-        ws.write(tbl + ri, 4, yoy, pf if yoy != "" else lf)
+        # For current year, yoy is None (suppressed in data_processor) — show "—"
+        ws.write(tbl + ri, 4, yoy if yoy != "" else "—", pf if yoy != "" else lf)
         ws.write(tbl + ri, 5, _v(row.get("ytd", 0)), nf)
         ytd_y = _pct(row.get("ytd_yoy"))
         ws.write(tbl + ri, 6, ytd_y, pf if ytd_y != "" else lf)
         ws.write(tbl + ri, 7, str(row.get("best_q", "—")), cf)
+
+    # Footnote explaining the asterisk on ÅoÅ-vekst column
+    tbl_end = tbl + len(ann_sum)
+    ws.set_row(tbl_end, 14)
+    ws.merge_range(tbl_end, 1, tbl_end, 7,
+        f"  * ÅoÅ-vekst for {max_year} vises ikke — {max_year} er et delvis år ({ytd_label}). "
+        f"Bruk kolonnen «YTD ÅoÅ» for en rettferdig sammenligning av samme periode.",
+        fmt["note"])
 
     # ── Strategiske innsikter ────────────────────────────────────────────
     pareto_df = data.get("pareto", pd.DataFrame())
@@ -657,11 +675,11 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
     qpivot        = data["quarterly_pivot"]
     seas_dict     = data["seasonality"]
 
-    ws.set_column(0, 0, 10)
+    ws.set_column(0, 0, 18)       # År / Periode label
     for c in range(1, 13):
-        ws.set_column(c, c, 10)
-    ws.set_column(13, 13, 13)
-    ws.set_column(14, 16, 10)
+        ws.set_column(c, c, 11)   # month columns
+    ws.set_column(13, 13, 14)     # TOTALT
+    ws.set_column(14, 16, 11)     # helper / waterfall cols
 
     ws.set_row(0, 34); ws.set_row(1, 15)
     ws.merge_range(0, 0, 0, 16,
@@ -774,51 +792,64 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
                        fmt["section_hdr"])
         next_r += 1
 
-        # Beregn absolutt månedlig endring
-        y_last   = str(all_years[-1])
-        y_prev   = str(all_years[-2])
-        delta_pos = []
-        delta_neg = []
-        for m_en in MONTHS_EN:
+        # Beregn absolutt månedlig endring — kun for måneder der BEGGE år har data.
+        # For det nåværende delåret (max_year) er måneder etter max_month tomme.
+        # Å inkludere dem ville gi enorme falske negative søyler i diagrammet.
+        y_last    = str(all_years[-1])
+        y_prev    = str(all_years[-2])
+        max_month = data.get("max_month", 12)
+        # Only plot months where the most recent year actually has data
+        plot_months = max_month if int(all_years[-1]) == data.get("max_year", 9999) else 12
+
+        delta_pos   = []
+        delta_neg   = []
+        month_labels = []
+        for mi, m_en in enumerate(MONTHS_EN):
+            if mi >= plot_months:
+                break          # stop at the last month with real data
             v_last = float(monthly_pivot.loc[y_last, m_en]) if (y_last in monthly_pivot.index and m_en in monthly_pivot.columns) else 0
             v_prev = float(monthly_pivot.loc[y_prev, m_en]) if (y_prev in monthly_pivot.index and m_en in monthly_pivot.columns) else 0
             delta = v_last - v_prev
             delta_pos.append(delta if delta > 0 else None)
             delta_neg.append(delta if delta <= 0 else None)
+            month_labels.append(MONTHS_NO[mi])
+
+        n_wfall = len(month_labels)
 
         # Skriv hjelpedata til skjulte kolonner (15, 16, 17)
         wfall_data_row = next_r
         ws.write(wfall_data_row, 14, "Positiv endring (NOK)", fmt["col_hdr"])
         ws.write(wfall_data_row, 15, "Negativ endring (NOK)", fmt["col_hdr"])
         next_r += 1
-        for mi in range(12):
-            ws.write(next_r + mi, 0,  MONTHS_NO[mi], fmt["cell"])
+        for mi in range(n_wfall):
+            ws.write(next_r + mi, 0,  month_labels[mi], fmt["cell"])
             ws.write(next_r + mi, 14, delta_pos[mi] if delta_pos[mi] is not None else "", fmt["cell_nok"])
             ws.write(next_r + mi, 15, delta_neg[mi] if delta_neg[mi] is not None else "", fmt["cell_nok"])
 
         wfall_chart = wb.add_chart({"type": "column"})
         wfall_chart.add_series({
             "name":       f"Vekst {y_last} vs {y_prev}",
-            "categories": ["Trendanalyse", next_r, 0, next_r + 11, 0],
-            "values":     ["Trendanalyse", next_r, 14, next_r + 11, 14],
+            "categories": ["Trendanalyse", next_r, 0, next_r + n_wfall - 1, 0],
+            "values":     ["Trendanalyse", next_r, 14, next_r + n_wfall - 1, 14],
             "fill":       {"color": ACCENT_GREEN},
             "border":     {"color": "#145A32"},
         })
         wfall_chart.add_series({
             "name":       f"Nedgang {y_last} vs {y_prev}",
-            "categories": ["Trendanalyse", next_r, 0, next_r + 11, 0],
-            "values":     ["Trendanalyse", next_r, 15, next_r + 11, 15],
+            "categories": ["Trendanalyse", next_r, 0, next_r + n_wfall - 1, 0],
+            "values":     ["Trendanalyse", next_r, 15, next_r + n_wfall - 1, 15],
             "fill":       {"color": ACCENT_RED},
             "border":     {"color": "#78281F"},
         })
-        wfall_chart.set_title({"name": f"Månedlig omsetningsendring: {y_last} vs {y_prev} (NOK)"})
+        ytd_note = f" (YTD {MONTHS_NO[plot_months-1]})" if plot_months < 12 else ""
+        wfall_chart.set_title({"name": f"Månedlig omsetningsendring{ytd_note}: {y_last} vs {y_prev} (NOK)"})
         wfall_chart.set_x_axis({"name": "Måned"})
         wfall_chart.set_y_axis({"name": "Endring (NOK)", "num_format": "#,##0"})
         wfall_chart.set_legend({"position": "bottom"})
         wfall_chart.set_style(10)
         wfall_chart.set_size({"width": 700, "height": 320})
         ws.insert_chart(next_r, 0, wfall_chart, {"x_offset": 2, "y_offset": 4})
-        next_r += 12 + 20  # 12 data rows + chart rows
+        next_r += n_wfall + 20  # data rows + chart rows
 
     # ── Kvartalsoversikt ─────────────────────────────────────────────────
     ws.set_row(next_r, 18)
@@ -891,14 +922,16 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
     n_yoy = max(0, len(all_years) - 1)
     n_cols = 1 + n_fy + 1 + n_yoy + 1 + 1
 
-    ws.set_column(0, 0, 26)
+    ws.set_column(0, 0, 28)                          # brand name
     for c in range(1, 1 + n_fy):
-        ws.set_column(c, c, 15)
-    ws.set_column(1 + n_fy, 1 + n_fy, 15)
-    for c in range(2 + n_fy, 2 + n_fy + n_yoy):
-        ws.set_column(c, c, 12)
-    ws.set_column(2 + n_fy + n_yoy, 2 + n_fy + n_yoy, 12)
-    ws.set_column(3 + n_fy + n_yoy, 3 + n_fy + n_yoy, 8)
+        ws.set_column(c, c, 16)                      # FY columns
+    ws.set_column(1 + n_fy, 1 + n_fy, 16)           # YTD column
+    for c in range(2 + n_fy, 2 + n_fy + n_yoy - 1):
+        ws.set_column(c, c, 14)                      # prior-year YoY columns
+    if n_yoy > 0:
+        ws.set_column(1 + n_fy + n_yoy, 1 + n_fy + n_yoy, 22)  # current YTD YoY (wider for label)
+    ws.set_column(2 + n_fy + n_yoy, 2 + n_fy + n_yoy, 14)      # share column
+    ws.set_column(3 + n_fy + n_yoy, 3 + n_fy + n_yoy, 8)       # ABC
 
     ws.set_row(0, 34); ws.set_row(1, 15)
     ws.merge_range(0, 0, 0, n_cols,
@@ -913,10 +946,17 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
     ws.set_row(3, 18)
     ws.merge_range(3, 0, 3, n_cols, "  VAREMERKEANALYSE", fmt["section_hdr"])
 
-    ws.set_row(4, 20)
+    ws.set_row(4, 22)
+
+    def _yoy_header(y1, y0, max_yr, ytd_lbl):
+        if y1 == max_yr:
+            return f"YTD ÅoÅ {y1}v{y0} ({ytd_lbl})"
+        return f"ÅoÅ {y1}v{y0}"
+
     headers = (["Varemerke"] + [f"FY {y}" for y in all_years] +
                [f"Hittil i år {ytd_label}"] +
-               [f"ÅoÅ {all_years[i]}v{all_years[i-1]}" for i in range(1, len(all_years))] +
+               [_yoy_header(all_years[i], all_years[i-1], max_year, ytd_label)
+                for i in range(1, len(all_years))] +
                [f"Andel FY{last_full}", "ABC"])
     for ci, h in enumerate(headers):
         hf = fmt["col_hdr_left"] if ci == 0 else fmt["col_hdr"]
