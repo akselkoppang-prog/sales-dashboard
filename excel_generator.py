@@ -704,28 +704,30 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
 
     ws.freeze_panes(monthly_col_row + 1, 1)
 
-    # Linjediagram — månedlig omsetning per år
-    chart = wb.add_chart({"type": "line"})
-    colors = [MID_BLUE, ACCENT_GREEN, ACCENT_RED, PURPLE, TEAL, ACCENT_ORG, DARK_BLUE]
-    for i in range(n_data_years):
-        chart.add_series({
-            "name":       str(monthly_pivot.index[i]),
-            "categories": ["Trendanalyse", monthly_col_row, 1, monthly_col_row, 12],
-            "values":     ["Trendanalyse", monthly_data_row + i, 1, monthly_data_row + i, 12],
-            "line":       {"width": 2.5, "color": colors[i % len(colors)]},
-            "marker":     {"type": "circle", "size": 5,
-                           "fill":   {"color": colors[i % len(colors)]},
-                           "border": {"color": WHITE}},
-        })
-    chart.set_title({"name": "Månedlig nettoomsetning per år (NOK)"})
-    chart.set_x_axis({"name": "Måned"})
-    chart.set_y_axis({"name": "NOK", "num_format": "#,##0"})
-    chart.set_legend({"position": "bottom"})
-    chart.set_style(10)
-    chart.set_size({"width": 700, "height": 340})
-
     next_r = r + len(monthly_pivot) + 2
-    ws.insert_chart(next_r, 0, chart, {"x_offset": 2, "y_offset": 4})
+
+    # Linjediagram — månedlig omsetning per år
+    if n_data_years > 0:
+        chart = wb.add_chart({"type": "line"})
+        colors = [MID_BLUE, ACCENT_GREEN, ACCENT_RED, PURPLE, TEAL, ACCENT_ORG, DARK_BLUE]
+        for i in range(n_data_years):
+            chart.add_series({
+                "name":       str(monthly_pivot.index[i]),
+                "categories": ["Trendanalyse", monthly_col_row, 1, monthly_col_row, 12],
+                "values":     ["Trendanalyse", monthly_data_row + i, 1, monthly_data_row + i, 12],
+                "line":       {"width": 2.5, "color": colors[i % len(colors)]},
+                "marker":     {"type": "circle", "size": 5,
+                               "fill":   {"color": colors[i % len(colors)]},
+                               "border": {"color": WHITE}},
+            })
+        chart.set_title({"name": "Månedlig nettoomsetning per år (NOK)"})
+        chart.set_x_axis({"name": "Måned"})
+        chart.set_y_axis({"name": "NOK", "num_format": "#,##0"})
+        chart.set_legend({"position": "bottom"})
+        chart.set_style(10)
+        chart.set_size({"width": 700, "height": 340})
+        ws.insert_chart(next_r, 0, chart, {"x_offset": 2, "y_offset": 4})
+
     next_r += 19
 
     # ── Månedlig ÅoÅ-vekst ──────────────────────────────────────────────
@@ -1023,24 +1025,25 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
         )
 
     n_chart = min(10, len(pareto_df))
-    bar_chart = wb.add_chart({"type": "bar"})
-    bar_chart.add_series({
-        "name":       "Nettoomsetning (NOK)",
-        "categories": ["Varemerkeanalyse", pareto_data_start, 1,
-                       pareto_data_start + n_chart - 1, 1],
-        "values":     ["Varemerkeanalyse", pareto_data_start, 2,
-                       pareto_data_start + n_chart - 1, 2],
-        "fill":       {"color": MID_BLUE},
-        "border":     {"color": DARK_BLUE},
-    })
-    bar_chart.set_title({"name": f"Topp {n_chart} varemerker etter nettoomsetning"})
-    bar_chart.set_x_axis({"name": "NOK", "num_format": "#,##0"})
-    bar_chart.set_y_axis({"name": "Varemerke", "reverse": True})
-    bar_chart.set_legend({"none": True})
-    bar_chart.set_style(10)
-    bar_chart.set_size({"width": 580, "height": 400})
-    chart_row = pareto_section + len(pareto_df) + 2
-    ws.insert_chart(chart_row, 0, bar_chart, {"x_offset": 2, "y_offset": 4})
+    if n_chart > 0:
+        bar_chart = wb.add_chart({"type": "bar"})
+        bar_chart.add_series({
+            "name":       "Nettoomsetning (NOK)",
+            "categories": ["Varemerkeanalyse", pareto_data_start, 1,
+                           pareto_data_start + n_chart - 1, 1],
+            "values":     ["Varemerkeanalyse", pareto_data_start, 2,
+                           pareto_data_start + n_chart - 1, 2],
+            "fill":       {"color": MID_BLUE},
+            "border":     {"color": DARK_BLUE},
+        })
+        bar_chart.set_title({"name": f"Topp {n_chart} varemerker etter nettoomsetning"})
+        bar_chart.set_x_axis({"name": "NOK", "num_format": "#,##0"})
+        bar_chart.set_y_axis({"name": "Varemerke", "reverse": True})
+        bar_chart.set_legend({"none": True})
+        bar_chart.set_style(10)
+        bar_chart.set_size({"width": 580, "height": 400})
+        chart_row = pareto_section + len(pareto_df) + 2
+        ws.insert_chart(chart_row, 0, bar_chart, {"x_offset": 2, "y_offset": 4})
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1302,18 +1305,25 @@ def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
 
     for cat in cats_present:
         cat_df = portfolio_df[portfolio_df["category"] == cat]
-        chart_data_rows[cat] = (helper_row, len(cat_df))
+        start = helper_row
         for _, row in cat_df.iterrows():
             share  = row.get("share_pct")
             growth = row.get("growth_pct")
             if share is None or growth is None:
                 continue
-            ws.write(helper_row, helper_col_base,     cat,                 fmt["cell"])
-            ws.write(helper_row, helper_col_base + 1, float(share),        fmt["cell_2dec"])
-            ws.write(helper_row, helper_col_base + 2, float(growth),       fmt["cell_2dec"])
-            ws.write(helper_row, helper_col_base + 3, str(row.get("brand","")), fmt["cell"])
+            try:
+                share_v  = float(share)
+                growth_v = float(growth)
+            except (TypeError, ValueError):
+                continue
+            ws.write(helper_row, helper_col_base,     cat,                      fmt["cell"])
+            ws.write(helper_row, helper_col_base + 1, share_v,                  fmt["cell_2dec"])
+            ws.write(helper_row, helper_col_base + 2, growth_v,                 fmt["cell_2dec"])
+            ws.write(helper_row, helper_col_base + 3, str(row.get("brand", "")), fmt["cell"])
             helper_row += 1
+        chart_data_rows[cat] = (start, helper_row - start)   # actual written rows
 
+    bcg_series_added = 0
     bcg_chart = wb.add_chart({"type": "scatter", "subtype": "straight_with_markers"})
 
     for cat in cats_present:
@@ -1338,23 +1348,24 @@ def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
             },
             "line": {"none": True},
         })
-
-    bcg_chart.set_title({"name": f"BCG-inspirert Vekst/Andel-matrise  ({ref_str})"})
-    bcg_chart.set_x_axis({
-        "name":       "Omsetningsandel (%) →  Høy andel = høyre",
-        "num_format": "0.0%",
-        "min": 0,
-    })
-    bcg_chart.set_y_axis({
-        "name":       "Vekstrate (%) ↑  Høy vekst = topp",
-        "num_format": "0.0%",
-    })
-    bcg_chart.set_legend({"position": "bottom"})
-    bcg_chart.set_style(10)
-    bcg_chart.set_size({"width": 600, "height": 440})
+        bcg_series_added += 1
 
     chart_insert_row = note_row + 3
-    ws.insert_chart(chart_insert_row, 0, bcg_chart, {"x_offset": 2, "y_offset": 4})
+    if bcg_series_added > 0:
+        bcg_chart.set_title({"name": f"BCG-inspirert Vekst/Andel-matrise  ({ref_str})"})
+        bcg_chart.set_x_axis({
+            "name":       "Omsetningsandel (%) →  Høy andel = høyre",
+            "num_format": "0.0%",
+            "min": 0,
+        })
+        bcg_chart.set_y_axis({
+            "name":       "Vekstrate (%) ↑  Høy vekst = topp",
+            "num_format": "0.0%",
+        })
+        bcg_chart.set_legend({"position": "bottom"})
+        bcg_chart.set_style(10)
+        bcg_chart.set_size({"width": 600, "height": 440})
+        ws.insert_chart(chart_insert_row, 0, bcg_chart, {"x_offset": 2, "y_offset": 4})
 
     # Matriseoversikt
     matrix_row = chart_insert_row + 28
