@@ -1,5 +1,5 @@
 """
-excel_generator.py  –  v1.0.0
+excel_generator.py  –  v1.0.1
 Genererer nettoomsetningsrapporten med 7 regneark.
 Bruker dict fra data_processor.process().
 
@@ -20,7 +20,7 @@ from datetime import datetime
 import pandas as pd
 import xlsxwriter
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 # ── Måneder ──────────────────────────────────────────────────────────────────
 MONTHS_EN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
@@ -1619,7 +1619,9 @@ def generate_dashboard(data: dict, report_name: str = "Rapport") -> bytes:
     """
     Genererer nettoomsetningsrapporten med 7 regneark.
     Bruker dict fra data_processor.process().
+    Returnerer .xlsm-bytes med VBA-makroer innbygd.
     """
+    import os
     output = io.BytesIO()
     wb = xlsxwriter.Workbook(output, {"in_memory": True, "nan_inf_to_errors": True})
     fmt = _add_formats(wb)
@@ -1632,6 +1634,15 @@ def generate_dashboard(data: dict, report_name: str = "Rapport") -> bytes:
     ws6 = wb.add_worksheet("Topp-artikler")
     ws7 = wb.add_worksheet("Data")
 
+    # Set VBA worksheet names (required for xlsm VBA references to work)
+    ws1.set_vba_name("Dashbord")
+    ws2.set_vba_name("Trendanalyse")
+    ws3.set_vba_name("Varemerkeanalyse")
+    ws4.set_vba_name("XYZanalyse")
+    ws5.set_vba_name("Portefolje")
+    ws6.set_vba_name("ToppArtikler")
+    ws7.set_vba_name("Data")
+
     _build_dashbord(wb,         ws1, data, fmt, report_name)
     _build_trendanalyse(wb,     ws2, data, fmt, report_name)
     _build_varemerkeanalyse(wb, ws3, data, fmt, report_name)
@@ -1639,6 +1650,11 @@ def generate_dashboard(data: dict, report_name: str = "Rapport") -> bytes:
     _build_portfolje(wb,        ws5, data, fmt, report_name)
     _build_topp_artikler(wb,    ws6, data, fmt, report_name)
     _build_data(wb,             ws7, data, fmt, report_name)
+
+    # Embed VBA project (year-filter buttons + navigation + PDF export)
+    vba_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vba_project.bin")
+    if os.path.exists(vba_bin):
+        wb.add_vba_project(vba_bin)
 
     ws1.activate()
     wb.close()
