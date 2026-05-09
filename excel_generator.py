@@ -1340,11 +1340,12 @@ def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
             color = _BCG_COLORS.get(cat, MID_BLUE)
             marker_type = _BCG_MARKERS.get(cat, "circle")
             bcg_chart.add_series({
-                "name":     cat,
-                "x_values": ["Portefølje", start_r, helper_col_base + 1,
-                              start_r + n_r - 1, helper_col_base + 1],
-                "y_values": ["Portefølje", start_r, helper_col_base + 2,
-                              start_r + n_r - 1, helper_col_base + 2],
+                "name":       cat,
+                # xlsxwriter scatter: "categories" = x-axis, "values" = y-axis
+                "categories": ["Portefølje", start_r, helper_col_base + 1,
+                                start_r + n_r - 1, helper_col_base + 1],
+                "values":     ["Portefølje", start_r, helper_col_base + 2,
+                                start_r + n_r - 1, helper_col_base + 2],
                 "marker": {
                     "type":   marker_type,
                     "size":   9,
