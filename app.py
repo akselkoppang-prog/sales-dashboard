@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from data_processor import process, compute_kpis
-from excel_generator import generate_dashboard
+from excel_generator import generate_dashboard, APP_VERSION
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -179,7 +179,7 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 # Hero header
 # ---------------------------------------------------------------------------
-st.markdown('<div class="hero-title">📊 Salgsrapport­generator</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="hero-title">📊 Salgsrapport­generator <span style="font-size:0.9rem;font-weight:400;color:#888;vertical-align:middle;">v{APP_VERSION}</span></div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="hero-subtitle">Last opp salgsdata og generer en profesjonelt formatert '
     'Excel-rapport — kjøres lokalt, ingen data sendes ut av maskinen din.</div>',

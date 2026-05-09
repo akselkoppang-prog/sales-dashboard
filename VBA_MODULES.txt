@@ -1,0 +1,221 @@
+' =============================================================================
+' VBA_MODULES.txt  –  Salgsrapport v1.0.0
+' Instructions:
+'   1. Open the generated .xlsx in Excel.
+'   2. Press Alt+F11 to open the VBA editor.
+'   3. Insert → Module, paste each module below into a separate Module.
+'   4. Save the file as .xlsm (macro-enabled workbook).
+' =============================================================================
+
+
+' -----------------------------------------------------------------------------
+' MODULE 1: NavigationButtons
+' Add a button to each sheet that calls these subs to jump between sheets.
+' Example: assign NavigateToDashboard to a button on the Dashbord sheet.
+' -----------------------------------------------------------------------------
+Option Explicit
+
+Sub NavigateToDashboard()
+    Sheets("Dashbord").Activate
+    Sheets("Dashbord").Range("A1").Select
+End Sub
+
+Sub NavigateToTrend()
+    Sheets("Trendanalyse").Activate
+    Sheets("Trendanalyse").Range("A1").Select
+End Sub
+
+Sub NavigateToBrand()
+    Sheets("Varemerkeanalyse").Activate
+    Sheets("Varemerkeanalyse").Range("A1").Select
+End Sub
+
+Sub NavigateToXYZ()
+    Sheets("XYZ-analyse").Activate
+    Sheets("XYZ-analyse").Range("A1").Select
+End Sub
+
+Sub NavigateToPortfolio()
+    Sheets("Portefolje").Activate
+    Sheets("Portefolje").Range("A1").Select
+End Sub
+
+Sub NavigateToTopItems()
+    Sheets("Topp-artikler").Activate
+    Sheets("Topp-artikler").Range("A1").Select
+End Sub
+
+Sub NavigateToData()
+    Sheets("Data").Activate
+    Sheets("Data").Range("A1").Select
+End Sub
+
+
+' -----------------------------------------------------------------------------
+' MODULE 2: YearFilter
+' Filters the "SalgsData" Excel Table in the Data sheet by year.
+' The year column is assumed to be column 1 (the "year" field in the table).
+' Assign Filter2024, Filter2025, Filter2026, ClearAllFilters to buttons.
+' -----------------------------------------------------------------------------
+Option Explicit
+
+Private Sub FilterByYear(yr As Long)
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+
+    Set ws = Sheets("Data")
+    Set tbl = ws.ListObjects("SalgsData")
+
+    ' Remove existing autofilter first
+    tbl.AutoFilter.ShowAllData
+
+    ' Apply filter on column 1 (year column) — adjust index if needed
+    Dim yearColIdx As Long
+    yearColIdx = 0
+    Dim lc As ListColumn
+    For Each lc In tbl.ListColumns
+        If LCase(lc.Name) = "year" Or LCase(lc.Name) = "ar" Or LCase(lc.Name) = "år" Then
+            yearColIdx = lc.Index
+            Exit For
+        End If
+    Next lc
+
+    If yearColIdx = 0 Then
+        MsgBox "Could not find 'year' column in SalgsData table.", vbExclamation
+        Exit Sub
+    End If
+
+    tbl.Range.AutoFilter Field:=yearColIdx, Criteria1:=CStr(yr)
+    ws.Activate
+End Sub
+
+Sub Filter2024()
+    FilterByYear 2024
+End Sub
+
+Sub Filter2025()
+    FilterByYear 2025
+End Sub
+
+Sub Filter2026()
+    FilterByYear 2026
+End Sub
+
+Sub ClearAllFilters()
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+
+    Set ws = Sheets("Data")
+    Set tbl = ws.ListObjects("SalgsData")
+
+    If tbl.AutoFilter.FilterMode Then
+        tbl.AutoFilter.ShowAllData
+    End If
+
+    ws.Activate
+    MsgBox "Alle filtre fjernet.", vbInformation
+End Sub
+
+
+' -----------------------------------------------------------------------------
+' MODULE 3: ExportToPDF
+' Exports a selected sheet (or the entire workbook) to PDF.
+' Assign ExportActiveToPDF or ExportAllToPDF to buttons as needed.
+' -----------------------------------------------------------------------------
+Option Explicit
+
+Sub ExportActiveToPDF()
+    Dim ws As Worksheet
+    Set ws = ActiveSheet
+
+    Dim savePath As String
+    savePath = Application.GetSaveAsFilename( _
+        InitialFileName:=ws.Name & "_rapport", _
+        FileFilter:="PDF Files (*.pdf), *.pdf", _
+        Title:="Lagre ark som PDF")
+
+    If savePath = "False" Then Exit Sub   ' user cancelled
+
+    ws.ExportAsFixedFormat _
+        Type:=xlTypePDF, _
+        Filename:=savePath, _
+        Quality:=xlQualityStandard, _
+        IncludeDocProperties:=True, _
+        IgnorePrintAreas:=False, _
+        OpenAfterPublish:=True
+
+    MsgBox "Arket ble eksportert til PDF:" & vbCrLf & savePath, vbInformation
+End Sub
+
+Sub ExportAllToPDF()
+    Dim savePath As String
+    savePath = Application.GetSaveAsFilename( _
+        InitialFileName:="Salgsrapport_full", _
+        FileFilter:="PDF Files (*.pdf), *.pdf", _
+        Title:="Lagre hele rapporten som PDF")
+
+    If savePath = "False" Then Exit Sub
+
+    ' Print all visible sheets except "Data" (raw data) to PDF
+    Dim sheetsToExport() As String
+    Dim count As Long
+    count = 0
+    Dim ws As Worksheet
+
+    For Each ws In ThisWorkbook.Worksheets
+        If ws.Visible = xlSheetVisible And ws.Name <> "Data" Then
+            count = count + 1
+            ReDim Preserve sheetsToExport(1 To count)
+            sheetsToExport(count) = ws.Name
+        End If
+    Next ws
+
+    If count = 0 Then
+        MsgBox "Ingen synlige ark å eksportere.", vbExclamation
+        Exit Sub
+    End If
+
+    ThisWorkbook.Sheets(sheetsToExport).Select
+    ActiveSheet.ExportAsFixedFormat _
+        Type:=xlTypePDF, _
+        Filename:=savePath, _
+        Quality:=xlQualityStandard, _
+        IncludeDocProperties:=True, _
+        IgnorePrintAreas:=False, _
+        OpenAfterPublish:=True
+
+    ' Deselect (go back to Dashboard)
+    Sheets("Dashbord").Activate
+    MsgBox "Rapporten ble eksportert til PDF:" & vbCrLf & savePath, vbInformation
+End Sub
+
+
+' -----------------------------------------------------------------------------
+' MODULE 4: RefreshAll
+' Refreshes all pivot tables / queries (useful if connected to external data).
+' Assign RefreshReport to a button on the Dashboard.
+' -----------------------------------------------------------------------------
+Option Explicit
+
+Sub RefreshReport()
+    Application.ScreenUpdating = False
+
+    Dim ws As Worksheet
+    Dim pt As PivotTable
+
+    ' Refresh all pivot tables
+    For Each ws In ThisWorkbook.Worksheets
+        For Each pt In ws.PivotTables
+            pt.RefreshTable
+        Next pt
+    Next ws
+
+    ' Refresh all query connections
+    Dim conn As WorkbookConnection
+    For Each conn In ThisWorkbook.Connections
+        conn.Refresh
+    Next conn
+
+    Application.ScreenUpdating = True
+    MsgBox "Rapporten er oppdatert.", vbInformation
+End Sub
