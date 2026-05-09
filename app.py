@@ -12,15 +12,99 @@ import streamlit as st
 from data_processor import process, compute_kpis
 from excel_generator import generate_dashboard, APP_VERSION
 
+
+# ---------------------------------------------------------------------------
+# Cached wrappers — recompute only when file content changes
+# ---------------------------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def _cached_process(file_bytes: bytes, file_name: str):
+    """Cache keyed on raw bytes + filename so re-uploads of the same file are free."""
+    import io
+    return process(io.BytesIO(file_bytes))
+
+
+@st.cache_data(show_spinner=False)
+def _cached_generate(data_key: str, report_name: str, _data: dict) -> bytes:
+    """Cache the generated Excel so repeated clicks don't rebuild the workbook."""
+    return generate_dashboard(_data, report_name=report_name)
+
+# ---------------------------------------------------------------------------
+# Translations — add keys here to extend language support
+# ---------------------------------------------------------------------------
+_STRINGS = {
+    "NO": {
+        "page_title":        "Salgsrapportgenerator",
+        "hero_title":        "Salgsrapportgenerator",
+        "hero_sub":          "Last opp salgsdata og generer en profesjonelt formatert Excel-rapport — kjøres lokalt, ingen data sendes ut av maskinen din.",
+        "step1":             "1. Last opp data",
+        "upload_label":      "Slipp CSV- eller Excel-filen her",
+        "preview_label":     "Dataforhåndsvisning",
+        "step2":             "2. Generer rapport",
+        "report_name_label": "Rapport / selskapsnavn",
+        "report_name_ph":    "f.eks. Jærprint, Acme AS, ...",
+        "generate_btn":      "Generer lederrapport",
+        "building":          "Bygger Excel-rapport…",
+        "reading":           "Leser og renser data…",
+        "success":           "Rapport generert på {elapsed:.1f}s — {rows:,} rader behandlet fordelt på 7 ark.",
+        "download_btn":      "Last ned lederrapport (.xlsx)",
+        "contains":          "Rapporten inneholder (7 ark):",
+        "footer":            "Kjøres 100% lokalt — ingen data sendes til noen server.",
+        "kpi_revenue":       "Bruttoomsetning",
+        "kpi_avg_order":     "Gjennomsnittlig ordrebeløp",
+        "kpi_transactions":  "Transaksjoner",
+        "kpi_units":         "Solgte enheter",
+        "kpi_mom":           "MoM-vekst",
+        "kpi_mom_sub":       "siste 2 måneder",
+        "lang_toggle":       "English",
+    },
+    "EN": {
+        "page_title":        "Sales Report Generator",
+        "hero_title":        "Sales Report Generator",
+        "hero_sub":          "Upload sales data to generate a professionally formatted Excel report — runs locally, no data leaves your machine.",
+        "step1":             "1. Upload Data",
+        "upload_label":      "Drop a CSV or Excel file here",
+        "preview_label":     "Data Preview",
+        "step2":             "2. Generate Report",
+        "report_name_label": "Report / Company Name",
+        "report_name_ph":    "e.g. Jærprint, Acme AS, ...",
+        "generate_btn":      "Generate Executive Report",
+        "building":          "Building Excel report…",
+        "reading":           "Reading and cleaning data…",
+        "success":           "Report generated in {elapsed:.1f}s — {rows:,} rows processed across 7 sheets.",
+        "download_btn":      "Download Executive Report (.xlsx)",
+        "contains":          "Report contains (7 sheets):",
+        "footer":            "Runs 100% locally — no data is sent to any server.",
+        "kpi_revenue":       "Gross Revenue",
+        "kpi_avg_order":     "Avg. Order Value",
+        "kpi_transactions":  "Transactions",
+        "kpi_units":         "Units Sold",
+        "kpi_mom":           "MoM Growth",
+        "kpi_mom_sub":       "last 2 months",
+        "lang_toggle":       "Norsk",
+    },
+}
+
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Salgs­dashbord­generator",
+    page_title="Salgsrapportgenerator",
     page_icon="📊",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
+
+# Language toggle in sidebar (persists via session state)
+if "lang" not in st.session_state:
+    st.session_state.lang = "NO"
+
+with st.sidebar:
+    st.markdown("**Language / Språk**")
+    if st.button(_STRINGS[st.session_state.lang]["lang_toggle"], use_container_width=True):
+        st.session_state.lang = "EN" if st.session_state.lang == "NO" else "NO"
+        st.rerun()
+
+T = _STRINGS[st.session_state.lang]   # active translation dict
 
 # ---------------------------------------------------------------------------
 # Custom CSS
@@ -179,20 +263,16 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 # Hero header
 # ---------------------------------------------------------------------------
-st.markdown(f'<div class="hero-title">📊 Salgsrapport­generator <span style="font-size:0.9rem;font-weight:400;color:#888;vertical-align:middle;">v{APP_VERSION}</span></div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="hero-subtitle">Last opp salgsdata og generer en profesjonelt formatert '
-    'Excel-rapport — kjøres lokalt, ingen data sendes ut av maskinen din.</div>',
-    unsafe_allow_html=True,
-)
+st.markdown(f'<div class="hero-title">📊 {T["hero_title"]} <span style="font-size:0.9rem;font-weight:400;color:#888;vertical-align:middle;">v{APP_VERSION}</span></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="hero-subtitle">{T["hero_sub"]}</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Upload card
 # ---------------------------------------------------------------------------
-st.markdown('<div class="section-label">1. Last opp data</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="section-label">{T["step1"]}</div>', unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader(
-    label="Slipp CSV- eller Excel-filen her",
+    label=T["upload_label"],
     type=["csv", "xlsx", "xls"],
     label_visibility="collapsed",
 )
@@ -216,16 +296,17 @@ df_clean = None
 _data = None
 
 if uploaded_file is not None:
-    with st.spinner("Leser og renser data…"):
+    with st.spinner(T["reading"]):
         try:
-            _data = process(uploaded_file)
+            _file_bytes = uploaded_file.read()
+            _data = _cached_process(_file_bytes, uploaded_file.name)
             df_clean = _data["df"]
         except Exception as e:
             st.markdown(f'<div class="error-box">⚠ {e}</div>', unsafe_allow_html=True)
 
     if df_clean is not None:
         st.markdown("---")
-        st.markdown('<div class="section-label">Dataforhåndsvisning</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-label">{T["preview_label"]}</div>', unsafe_allow_html=True)
         preview_cols = ["date", "brand", "net_sales", "units", "article_desc"]
         st.dataframe(
             df_clean[[c for c in preview_cols if c in df_clean.columns]].head(8),
@@ -248,27 +329,27 @@ if uploaded_file is not None:
             color = "#1E8449" if kpis["mom_growth"] >= 0 else "#C0392B"
             mom_html = f"""
             <div class="kpi-tile" style="border-left-color:{color}">
-                <div class="kpi-label">MoM-vekst</div>
+                <div class="kpi-label">{T["kpi_mom"]}</div>
                 <div class="kpi-value" style="color:{color}">{sign}{kpis['mom_growth']:.1f}%</div>
-                <div class="kpi-sub">siste 2 måneder</div>
+                <div class="kpi-sub">{T["kpi_mom_sub"]}</div>
             </div>"""
 
         st.markdown(f"""
         <div class="kpi-grid">
             <div class="kpi-tile">
-                <div class="kpi-label">Total omsetning</div>
+                <div class="kpi-label">{T["kpi_revenue"]}</div>
                 <div class="kpi-value">{_fmt_money(kpis['total_revenue'])}</div>
             </div>
             <div class="kpi-tile">
-                <div class="kpi-label">Snitt ordrebeløp</div>
+                <div class="kpi-label">{T["kpi_avg_order"]}</div>
                 <div class="kpi-value">{_fmt_money(kpis['avg_order_value'])}</div>
             </div>
             <div class="kpi-tile">
-                <div class="kpi-label">Transaksjoner</div>
+                <div class="kpi-label">{T["kpi_transactions"]}</div>
                 <div class="kpi-value">{kpis['num_transactions']:,}</div>
             </div>
             <div class="kpi-tile">
-                <div class="kpi-label">Totalt antall solgt</div>
+                <div class="kpi-label">{T["kpi_units"]}</div>
                 <div class="kpi-value">{kpis['total_quantity']:,}</div>
             </div>
             {mom_html}
@@ -279,36 +360,36 @@ if uploaded_file is not None:
 # Generate button
 # ---------------------------------------------------------------------------
 st.markdown("---")
-st.markdown('<div class="section-label">2. Generer rapport</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="section-label">{T["step2"]}</div>', unsafe_allow_html=True)
 
 report_name = st.text_input(
-    "Rapport / selskapsnavn",
+    T["report_name_label"],
     value="Jærprint",
-    placeholder="f.eks. Jærprint, Acme AS, ...",
+    placeholder=T["report_name_ph"],
     help="Dette navnet vises i alle arkstitler og overskrifter i den genererte Excel-filen.",
 ).strip() or "Rapport"
 
 if df_clean is None:
-    st.button("Generer lederrapport", disabled=True)
+    st.button(T["generate_btn"], disabled=True)
 else:
-    if st.button("Generer lederrapport"):
-        with st.spinner("Bygger Excel-rapport…"):
+    if st.button(T["generate_btn"]):
+        with st.spinner(T["building"]):
             try:
                 t0 = time.time()
-                excel_bytes = generate_dashboard(_data, report_name=report_name)
+                _cache_key = f"{uploaded_file.name}_{len(_file_bytes)}_{report_name}"
+                excel_bytes = _cached_generate(_cache_key, report_name, _data)
                 elapsed = time.time() - t0
 
                 safe_name = report_name.replace(" ", "_").replace("/", "-")
                 filename = f"{safe_name}_rapport_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
                 st.markdown(
-                    f'<div class="success-box">✓ Rapport generert på {elapsed:.1f}s — '
-                    f'{len(df_clean):,} rader behandlet fordelt på 7 ark.</div>',
+                    f'<div class="success-box">✓ {T["success"].format(elapsed=elapsed, rows=len(df_clean))}</div>',
                     unsafe_allow_html=True,
                 )
 
                 st.download_button(
-                    label="⬇  Last ned lederrapport (.xlsx)",
+                    label=f"⬇  {T['download_btn']}",
                     data=excel_bytes,
                     file_name=filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -334,6 +415,6 @@ else:
 # ---------------------------------------------------------------------------
 st.markdown("---")
 st.markdown(
-    "<small style='color:#aaa;'>Kjøres 100% lokalt — ingen data sendes til noen server.</small>",
+    f"<small style='color:#aaa;'>{T['footer']}</small>",
     unsafe_allow_html=True,
 )
