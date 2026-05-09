@@ -1323,35 +1323,36 @@ def _build_portfolje(wb, ws, data, fmt, report_name="Rapport"):
             helper_row += 1
         chart_data_rows[cat] = (start, helper_row - start)   # actual written rows
 
-    bcg_series_added = 0
-    bcg_chart = wb.add_chart({"type": "scatter", "subtype": "straight_with_markers"})
-
-    for cat in cats_present:
-        if cat not in chart_data_rows:
-            continue
-        start_r, n_r = chart_data_rows[cat]
-        if n_r == 0:
-            continue
-        color = _BCG_COLORS.get(cat, MID_BLUE)
-        marker_type = _BCG_MARKERS.get(cat, "circle")
-        bcg_chart.add_series({
-            "name":     cat,
-            "x_values": ["Portefølje", start_r, helper_col_base + 1,
-                          start_r + n_r - 1, helper_col_base + 1],
-            "y_values": ["Portefølje", start_r, helper_col_base + 2,
-                          start_r + n_r - 1, helper_col_base + 2],
-            "marker": {
-                "type":   marker_type,
-                "size":   9,
-                "fill":   {"color": color},
-                "border": {"color": DARK_BLUE},
-            },
-            "line": {"none": True},
-        })
-        bcg_series_added += 1
+    # Only create the chart object when we know at least one series has data.
+    # xlsxwriter raises EmptyChartSeries on wb.close() for any registered chart
+    # with no series, even if the chart was never inserted into a sheet.
+    has_bcg_data = any(n_r > 0 for _, n_r in chart_data_rows.values())
 
     chart_insert_row = note_row + 3
-    if bcg_series_added > 0:
+    if has_bcg_data:
+        bcg_chart = wb.add_chart({"type": "scatter", "subtype": "straight_with_markers"})
+        for cat in cats_present:
+            if cat not in chart_data_rows:
+                continue
+            start_r, n_r = chart_data_rows[cat]
+            if n_r == 0:
+                continue
+            color = _BCG_COLORS.get(cat, MID_BLUE)
+            marker_type = _BCG_MARKERS.get(cat, "circle")
+            bcg_chart.add_series({
+                "name":     cat,
+                "x_values": ["Portefølje", start_r, helper_col_base + 1,
+                              start_r + n_r - 1, helper_col_base + 1],
+                "y_values": ["Portefølje", start_r, helper_col_base + 2,
+                              start_r + n_r - 1, helper_col_base + 2],
+                "marker": {
+                    "type":   marker_type,
+                    "size":   9,
+                    "fill":   {"color": color},
+                    "border": {"color": DARK_BLUE},
+                },
+                "line": {"none": True},
+            })
         bcg_chart.set_title({"name": f"BCG-inspirert Vekst/Andel-matrise  ({ref_str})"})
         bcg_chart.set_x_axis({
             "name":       "Omsetningsandel (%) →  Høy andel = høyre",
