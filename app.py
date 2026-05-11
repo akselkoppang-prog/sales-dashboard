@@ -46,7 +46,7 @@ _STRINGS = {
         "building":          "Bygger Excel-rapport…",
         "reading":           "Leser og renser data…",
         "success":           "Rapport generert på {elapsed:.1f}s — {rows:,} rader behandlet fordelt på 7 ark.",
-        "download_btn":      "Last ned lederrapport (.xlsm)",
+        "download_btn":      "Last ned lederrapport (.xlsx)",
         "contains":          "Rapporten inneholder (7 ark):",
         "footer":            "Kjøres 100% lokalt — ingen data sendes til noen server.",
         "kpi_revenue":       "Bruttoomsetning",
@@ -71,7 +71,7 @@ _STRINGS = {
         "building":          "Building Excel report…",
         "reading":           "Reading and cleaning data…",
         "success":           "Report generated in {elapsed:.1f}s — {rows:,} rows processed across 7 sheets.",
-        "download_btn":      "Download Executive Report (.xlsm)",
+        "download_btn":      "Download Executive Report (.xlsx)",
         "contains":          "Report contains (7 sheets):",
         "footer":            "Runs 100% locally — no data is sent to any server.",
         "kpi_revenue":       "Gross Revenue",
@@ -381,7 +381,7 @@ else:
                 elapsed = time.time() - t0
 
                 safe_name = report_name.replace(" ", "_").replace("/", "-")
-                filename = f"{safe_name}_rapport_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsm"
+                filename = f"{safe_name}_rapport_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
                 st.markdown(
                     f'<div class="success-box">✓ {T["success"].format(elapsed=elapsed, rows=len(df_clean))}</div>',
@@ -392,7 +392,7 @@ else:
                     label=f"⬇  {T['download_btn']}",
                     data=excel_bytes,
                     file_name=filename,
-                    mime="application/vnd.ms-excel.sheet.macroEnabled.12",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
 
                 st.markdown("""
@@ -405,8 +405,7 @@ else:
                 - **Ark 6 – Topp-artikler:** Bestselgende artikler per år **og** totalt for topp 5 varemerker — farge/størrelse konsolidert
                 - **Ark 7 – Data:** Rensede transaksjonsdata med frosne overskrifter og autofilter
 
-                > **VBA-makroer innebygd (.xlsm):** Klikk «Aktiver innhold» i Excel, kjor deretter `AddYearButtons` (Alt+F8) for arsfilterknapper pa Dashbordet.
-                """)
+""")
 
             except Exception as e:
                 st.markdown(f'<div class="error-box">⚠ Feil ved generering av rapport: {e}</div>', unsafe_allow_html=True)
