@@ -768,11 +768,16 @@ def _build_trendanalyse(wb, ws, data, fmt, report_name="Rapport"):
         ws.write(next_r + ri, 13, fy_v, pf if fy_v != "" else lf)
 
     # Icon set kondisjonell formatering på ÅoÅ-tabellen
+    # Custom thresholds: up = positive, right = zero, down = negative
+    _yoy_icons = [
+        {"criteria": ">",  "type": "number", "value": 0},
+        {"criteria": ">=", "type": "number", "value": 0},
+    ]
     if len(monthly_yoy) > 0:
         ws.conditional_format(
             yoy_data_start, 1,
             yoy_data_start + len(monthly_yoy) - 1, 13,
-            {"type": "icon_set", "icon_style": "3_arrows"}
+            {"type": "icon_set", "icon_style": "3_arrows", "icons": _yoy_icons}
         )
 
     next_r += max(len(monthly_yoy), 1) + 3
@@ -1009,13 +1014,17 @@ def _build_varemerkeanalyse(wb, ws, data, fmt, report_name="Rapport"):
             }
         )
 
-        # Pil-ikonset på ÅoÅ-kolonner
+        # Pil-ikonset på ÅoÅ-kolonner — opp = positiv, høyre = null, ned = negativ
+        _brand_yoy_icons = [
+            {"criteria": ">",  "type": "number", "value": 0},
+            {"criteria": ">=", "type": "number", "value": 0},
+        ]
         for i in range(n_yoy):
             yoy_col = 2 + n_fy + i
             ws.conditional_format(
                 data_start_row, yoy_col,
                 data_start_row + n_brands_data - 1, yoy_col,
-                {"type": "icon_set", "icon_style": "3_arrows"}
+                {"type": "icon_set", "icon_style": "3_arrows", "icons": _brand_yoy_icons}
             )
 
     pareto_section = 5 + len(brand_perf) + 3
